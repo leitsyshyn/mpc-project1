@@ -4,9 +4,8 @@
 # Text corpus (not included in the submission archive)
 /data/
 
-# Generated indexes and measurement results
+# Generated indexes
 *.tsv
-/results/
 
 # Profiling and test artifacts
 *.test

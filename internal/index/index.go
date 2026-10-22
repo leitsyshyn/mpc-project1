@@ -29,6 +29,17 @@ func (ix Index) Add(word []byte, doc int) {
 	e.Docs[doc]++
 }
 
+// Occurrences returns the total number of word occurrences in the parts.
+func Occurrences(parts ...Index) int {
+	n := 0
+	for _, ix := range parts {
+		for _, e := range ix {
+			n += e.Total
+		}
+	}
+	return n
+}
+
 // Write writes the index, one line per word:
 //
 //	word<TAB>total<TAB>docN:count,docM:count,...

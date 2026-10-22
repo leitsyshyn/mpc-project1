@@ -60,6 +60,7 @@ func run(args []string, log io.Writer) error {
 	var parts []index.Index
 	times := bench.Measure(*warmup, *repeat, func() { parts = build(texts, opts) })
 	fmt.Fprintf(log, "%s p=%d: %v over %d runs\n", *version, *threads, bench.Summarize(times), *repeat)
+	fmt.Fprintf(log, "occurrences: %d\n", index.Occurrences(parts...))
 
 	if *csvPath != "" {
 		rows := bench.Rows("invindex", *version, *threads, 0, times)

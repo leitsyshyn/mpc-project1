@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -23,8 +24,12 @@ func TestRun(t *testing.T) {
 	csv := filepath.Join(dir, "results.csv")
 
 	args := []string{"-v", "v0", "-in", in, "-out", out, "-repeat", "3", "-csv", csv}
-	if err := run(args, io.Discard); err != nil {
+	var log bytes.Buffer
+	if err := run(args, &log); err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(log.String(), "occurrences: 4") {
+		t.Errorf("log does not report the 4 occurrences:\n%s", &log)
 	}
 
 	got, err := os.ReadFile(out)

@@ -17,7 +17,9 @@ effect on performance. The report is in [`report/report.md`](report/report.md).
 | `cmd/falseshare`  | standalone false sharing experiment                          |
 | `internal/index`  | tokenizer, corpus loader, index, output format, versions     |
 | `internal/bench`  | measurement methodology: warmup, repeats, median, `results.csv` |
-| `scripts/`        | corpus download                                              |
+| `scripts/`        | corpus download and experiment scripts                       |
+| `results/`        | measurement results                                          |
+| `report/`         | report                                                       |
 
 ## Corpus
 
@@ -45,13 +47,20 @@ bin/invindex -v v0 -in data -out v0.tsv -csv results.csv
 
 | Flag      | Default     | Meaning                                         |
 | --------- | ----------- | ----------------------------------------------- |
-| `-v`      | `v0`        | version (`v0` sequential)                       |
+| `-v`      | `v0`        | version: `v0` sequential, `v1` unsynchronized   |
 | `-p`      | `1`         | number of worker goroutines (ignored by `v0`)   |
 | `-in`     | `data`      | corpus directory                                |
 | `-out`    | `index.tsv` | output file                                     |
 | `-warmup` | `1`         | untimed runs before measuring                   |
 | `-repeat` | `5`         | timed runs                                      |
 | `-csv`    | none        | append per-run timings to this CSV file         |
+
+The tool also prints the total number of occurrences, which is how V1's lost
+updates are counted.
+
+```sh
+scripts/v1-lost-updates.sh 2 4 8 10 > results/v1-lost-updates.csv   # 10 V1 runs per thread count vs V0
+```
 
 The corpus is read into memory before timing, and the index is written after
 it. Only the build is timed. The tool prints the median, min and max to stderr.
@@ -67,7 +76,7 @@ word<TAB>total<TAB>doc17:12,doc3:5,doc41:1
 
 ```sh
 go test ./...                                          # unit and end-to-end tests
-go test -race ./...                                    # with the race detector
+go test -race ./...                                    # with the race detector (skips V1's race tests)
 go test ./internal/index -run '^$' -fuzz FuzzWords     # fuzz the tokenizer
 go vet ./... && gofmt -l .
 ```
