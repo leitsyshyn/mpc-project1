@@ -23,13 +23,18 @@ func TestRun(t *testing.T) {
 	out := filepath.Join(dir, "index.tsv")
 	csv := filepath.Join(dir, "results.csv")
 
-	args := []string{"-v", "v0", "-in", in, "-out", out, "-repeat", "3", "-csv", csv}
+	prof := filepath.Join(dir, "cpu.pprof")
+	args := []string{"-v", "v0", "-in", in, "-out", out, "-repeat", "3", "-csv", csv, "-cpuprofile", prof}
 	var log bytes.Buffer
 	if err := run(args, &log); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(log.String(), "occurrences: 4") {
 		t.Errorf("log does not report the 4 occurrences:\n%s", &log)
+	}
+
+	if info, err := os.Stat(prof); err != nil || info.Size() == 0 {
+		t.Errorf("no CPU profile written: %v", err)
 	}
 
 	got, err := os.ReadFile(out)
@@ -54,6 +59,22 @@ func TestRun(t *testing.T) {
 	if !strings.HasPrefix(lines[1], "invindex,v0,1,,1,") {
 		t.Errorf("csv row = %q, want invindex,v0,1,,1,<seconds>", lines[1])
 	}
+
+	// Only V3 has a K, so only V3 records one.
+	if err := run([]string{"-v", "v3", "-p", "2", "-k", "16", "-in", in, "-out", out, "-repeat", "1", "-csv", csv}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	rows, err = os.ReadFile(csv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines = strings.Split(strings.TrimSpace(string(rows)), "\n")
+	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "invindex,v3,2,16,1,") {
+		t.Errorf("csv row = %q, want invindex,v3,2,16,1,<seconds>", last)
+	}
+	if got, _ := os.ReadFile(out); string(got) != "hello\t2\tdoc0:2\nworld\t2\tdoc0:1,doc1:1\n" {
+		t.Errorf("v3 index =\n%s", got)
+	}
 }
 
 func TestRunRejectsBadArgs(t *testing.T) {
@@ -61,6 +82,7 @@ func TestRunRejectsBadArgs(t *testing.T) {
 		{"-v", "v9"},
 		{"-repeat", "0"},
 		{"-p", "0"},
+		{"-v", "v3", "-k", "0"},
 		{"-in", filepath.Join(t.TempDir(), "missing")},
 	} {
 		if err := run(args, io.Discard); err == nil {

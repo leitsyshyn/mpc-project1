@@ -4,6 +4,7 @@ package index
 
 import (
 	"fmt"
+	"hash/maphash"
 	"maps"
 	"slices"
 	"strings"
@@ -14,6 +15,7 @@ import (
 // Options configures the parallel versions.
 type Options struct {
 	Threads int // worker goroutines
+	Stripes int // V3: number of locks K
 }
 
 // BuildFunc builds the index of texts, where texts[i] is document i. The result
@@ -23,7 +25,16 @@ type BuildFunc func(texts [][]byte, o Options) []Index
 var versions = map[string]BuildFunc{
 	"v0": sequential,
 	"v1": unsynchronized,
+	"v2": singleLock,
+	"v3": striped,
 }
+
+// seed keys the hash that picks V1's buckets and V3's stripes.
+var seed = maphash.MakeSeed()
+
+// cacheLine is the cache line size of the target machine (Apple M1; 64 bytes
+// on most x86 CPUs, so 128 covers both).
+const cacheLine = 128
 
 // Versions returns the names of all versions in order.
 func Versions() []string { return slices.Sorted(maps.Keys(versions)) }
@@ -78,4 +89,49 @@ func unsynchronized(texts [][]byte, o Options) []Index {
 		}
 	})
 	return []Index{t.index()}
+}
+
+// singleLock is V2: one shared index guarded by a single mutex taken for every
+// update.
+func singleLock(texts [][]byte, o Options) []Index {
+	ix := Index{}
+	var mu sync.Mutex
+	parallel(texts, o, func(_, doc int) {
+		for w := range Words(texts[doc]) {
+			mu.Lock()
+			ix.Add(w, doc)
+			mu.Unlock()
+		}
+	})
+	return []Index{ix}
+}
+
+// stripe is one of V3's K independent index parts with its own lock, padded so
+// that neighboring locks do not share a cache line.
+type stripe struct {
+	mu sync.Mutex
+	ix Index
+	_  [cacheLine - 16]byte
+}
+
+// striped is V3: the index is split into K stripes and a word belongs to
+// stripe hash(word) mod K, so updates of different stripes do not contend.
+func striped(texts [][]byte, o Options) []Index {
+	stripes := make([]stripe, o.Stripes)
+	for i := range stripes {
+		stripes[i].ix = Index{}
+	}
+	parallel(texts, o, func(_, doc int) {
+		for w := range Words(texts[doc]) {
+			s := &stripes[maphash.Bytes(seed, w)%uint64(len(stripes))]
+			s.mu.Lock()
+			s.ix.Add(w, doc)
+			s.mu.Unlock()
+		}
+	})
+	parts := make([]Index, len(stripes))
+	for i := range stripes {
+		parts[i] = stripes[i].ix
+	}
+	return parts
 }

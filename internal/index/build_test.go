@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"unsafe"
 )
 
 var sample = [][]byte{
@@ -69,19 +70,43 @@ func TestUnknownVersion(t *testing.T) {
 }
 
 // correct lists the versions whose output must match V0 byte for byte.
-var correct = []string{}
+var correct = []string{"v2", "v3"}
 
 func TestCorrectVersionsMatchV0(t *testing.T) {
 	texts := zipfCorpus(60)
 	want := write(t, build(t, "v0", texts, Options{})...)
 	for _, v := range correct {
 		for _, p := range []int{1, 2, 3, 8, 100} { // more threads than documents too
-			t.Run(fmt.Sprintf("%s/p=%d", v, p), func(t *testing.T) {
-				if got := write(t, build(t, v, texts, Options{Threads: p})...); got != want {
-					t.Errorf("output differs from v0")
-				}
-			})
+			for _, k := range []int{1, 7, 4096} { // more stripes than words too
+				t.Run(fmt.Sprintf("%s/p=%d/k=%d", v, p, k), func(t *testing.T) {
+					if got := write(t, build(t, v, texts, Options{Threads: p, Stripes: k})...); got != want {
+						t.Errorf("output differs from v0")
+					}
+				})
+			}
 		}
+	}
+}
+
+func TestV3PartsAreDisjoint(t *testing.T) {
+	parts := build(t, "v3", zipfCorpus(20), Options{Threads: 4, Stripes: 16})
+	if len(parts) != 16 {
+		t.Fatalf("got %d parts, want one per stripe", len(parts))
+	}
+	seen := map[string]int{}
+	for i, ix := range parts {
+		for word := range ix {
+			if j, ok := seen[word]; ok {
+				t.Fatalf("word %q is in parts %d and %d", word, j, i)
+			}
+			seen[word] = i
+		}
+	}
+}
+
+func TestStripeFillsCacheLine(t *testing.T) {
+	if size := unsafe.Sizeof(stripe{}); size != cacheLine {
+		t.Errorf("stripe is %d bytes, want %d", size, cacheLine)
 	}
 }
 

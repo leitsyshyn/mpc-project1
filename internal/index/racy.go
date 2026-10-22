@@ -31,8 +31,6 @@ type node struct {
 
 const allDocs = -1
 
-var seed = maphash.MakeSeed()
-
 // newRacyTable sizes the table to one bucket per 64 bytes of input, which
 // keeps chains short for natural text.
 func newRacyTable(size int) *racyTable {
