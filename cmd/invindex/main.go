@@ -17,8 +17,14 @@ import (
 	"concurrent/internal/index"
 )
 
+var errUsage = errors.New("usage")
+
 func main() {
-	if err := run(os.Args[1:], os.Stderr); err != nil {
+	switch err := run(os.Args[1:], os.Stderr); {
+	case err == nil, errors.Is(err, flag.ErrHelp):
+	case errors.Is(err, errUsage):
+		os.Exit(2)
+	default:
 		fmt.Fprintln(os.Stderr, "invindex:", err)
 		os.Exit(1)
 	}
@@ -30,7 +36,7 @@ func run(args []string, log io.Writer) error {
 	version := fs.String("v", "v0", "version: "+strings.Join(index.Versions(), ", "))
 	threads := fs.Int("p", 1, "number of goroutines, ignored by v0")
 	stripes := fs.Int("k", 1024, "number of locks K of v3")
-	tokenizer := fs.String("tokenizer", "simple", "tokenizer: "+strings.Join(index.Tokenizers(), ", "))
+	tokenizer := fs.String("tokenizer", "swar", "tokenizer: "+strings.Join(index.Tokenizers(), ", "))
 	in := fs.String("in", "data", "corpus directory")
 	out := fs.String("out", "index.tsv", "output file")
 	warmup := fs.Int("warmup", 1, "untimed runs before measuring")
@@ -38,7 +44,7 @@ func run(args []string, log io.Writer) error {
 	csvPath := fs.String("csv", "", "append the timings to this CSV file")
 	cpuProfile := fs.String("cpuprofile", "", "write a CPU profile of the runs to this file")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 
 	build, err := index.Version(*version)
@@ -53,7 +59,7 @@ func run(args []string, log io.Writer) error {
 		return errors.New("-p, -k and -repeat must be positive and -warmup non-negative")
 	}
 	label, k := *version, 0
-	if *tokenizer != "simple" {
+	if *tokenizer != "swar" {
 		label += "-" + *tokenizer
 	}
 	if *version == "v3" {
@@ -74,13 +80,23 @@ func run(args []string, log io.Writer) error {
 	if err != nil {
 		return err
 	}
-	var parts []index.Index
-	var merge time.Duration
-	var merges []time.Duration
-	opts := index.Options{Threads: *threads, Stripes: *stripes, MergeTime: &merge, Tokenize: tokenize}
+	var (
+		parts  []index.Index
+		merge  time.Duration
+		merges = make([]time.Duration, 0, *warmup+*repeat)
+	)
+	opts := index.Options{
+		Threads:   *threads,
+		Stripes:   *stripes,
+		MergeTime: &merge,
+		Tokenize:  tokenize,
+	}
 	times := bench.Measure(*warmup, *repeat, func() {
-		parts = build(texts, opts)
+		result := build(texts, opts)
 		merges = append(merges, merge)
+		if len(merges) == *warmup+*repeat {
+			parts = result
+		}
 	})
 	merges = merges[*warmup:]
 	if err := stop(); err != nil {

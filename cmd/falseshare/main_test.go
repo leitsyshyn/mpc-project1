@@ -12,8 +12,8 @@ import (
 func TestCountersLayout(t *testing.T) {
 	for _, stride := range []int{8, 40, 64, 128} {
 		cs := counters(4, stride)
-		if addr := uintptr(unsafe.Pointer(cs[0])); addr%align != 0 {
-			t.Errorf("stride %d: first counter at %#x, not %d-byte aligned", stride, addr, align)
+		if addr := uintptr(unsafe.Pointer(cs[0])); addr%cacheLine != 0 {
+			t.Errorf("stride %d: first counter at %#x, not %d-byte aligned", stride, addr, cacheLine)
 		}
 		for i := 1; i < len(cs); i++ {
 			if gap := uintptr(unsafe.Pointer(cs[i])) - uintptr(unsafe.Pointer(cs[i-1])); gap != uintptr(stride) {

@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"flag"
 	"io"
 	"os"
 	"path/filepath"
@@ -40,10 +42,26 @@ func TestRun(t *testing.T) {
 		args []string
 		rows map[string]int
 	}{
-		{"v0", []string{"-v", "v0", "-repeat", "3"}, map[string]int{"invindex,v0,1,,": 3}},
-		{"v3 records k", []string{"-v", "v3", "-p", "2", "-k", "16", "-repeat", "1"}, map[string]int{"invindex,v3,2,16,": 1}},
-		{"v4 records merges", []string{"-v", "v4tree", "-p", "2", "-repeat", "2"}, map[string]int{"invindex,v4tree,2,,": 2, "invindex,v4tree-merge,2,,": 2}},
-		{"tokenizer in version", []string{"-tokenizer", "fast", "-repeat", "1"}, map[string]int{"invindex,v0-fast,1,,": 1}},
+		{
+			name: "v0",
+			args: []string{"-v", "v0", "-repeat", "3"},
+			rows: map[string]int{"invindex,v0,1,,": 3},
+		},
+		{
+			name: "v3 records k",
+			args: []string{"-v", "v3", "-p", "2", "-k", "16", "-repeat", "1"},
+			rows: map[string]int{"invindex,v3,2,16,": 1},
+		},
+		{
+			name: "v4 records merges",
+			args: []string{"-v", "v4tree", "-p", "2", "-repeat", "2"},
+			rows: map[string]int{"invindex,v4tree,2,,": 2, "invindex,v4tree-merge,2,,": 2},
+		},
+		{
+			name: "non-default tokenizer in version",
+			args: []string{"-tokenizer", "std", "-repeat", "1"},
+			rows: map[string]int{"invindex,v0-std,1,,": 1},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -61,8 +79,8 @@ func TestRun(t *testing.T) {
 			}
 
 			lines := strings.Split(strings.TrimSpace(read(t, csv)), "\n")
-			if lines[0] != strings.Join(bench.Header, ",") {
-				t.Errorf("csv header = %q", lines[0])
+			if want := strings.Join(bench.Header, ","); lines[0] != want {
+				t.Errorf("csv header = %q, want %q", lines[0], want)
 			}
 			total := 0
 			for prefix, want := range tt.rows {
@@ -96,6 +114,12 @@ func TestRunWritesCPUProfile(t *testing.T) {
 	}
 }
 
+func TestRunHelp(t *testing.T) {
+	if err := run([]string{"-h"}, io.Discard); !errors.Is(err, flag.ErrHelp) {
+		t.Errorf("run(-h) = %v, want flag.ErrHelp", err)
+	}
+}
+
 func TestRunRejectsBadArgs(t *testing.T) {
 	for _, args := range [][]string{
 		{"-v", "v9"},
@@ -105,8 +129,8 @@ func TestRunRejectsBadArgs(t *testing.T) {
 		{"-tokenizer", "regex"},
 		{"-in", filepath.Join(t.TempDir(), "missing")},
 	} {
-		if err := run(args, io.Discard); err == nil {
-			t.Errorf("run(%q) succeeded, want error", args)
+		if err := run(args, io.Discard); err == nil || errors.Is(err, flag.ErrHelp) {
+			t.Errorf("run(%q) = %v, want error", args, err)
 		}
 	}
 }

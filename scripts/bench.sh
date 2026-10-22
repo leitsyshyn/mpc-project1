@@ -6,7 +6,7 @@
 #   v0           sequential baseline
 #   v2 v3 ...    scaling: the version for every P in $THREADS (V3 with K=$K)
 #   k            V3 for every K in $KS with P=$KP
-#   fast         V0 and V4 (tree, P=$KP) with the optimized tokenizer
+#   std          V0 and V4 (tree, P=$KP) with the standard-library tokenizer Words
 # Env: DIR (data), CSV (results.csv), THREADS (1 2 4 6 8 10), K (1024),
 #      KS (1 4 16 64 256 1024 4096), KP (8)
 set -euo pipefail
@@ -42,13 +42,13 @@ measure() {
 "$bin" -v v0 -in "$dir" -out "$tmp/v0.tsv" -warmup 0 -repeat 1 2>/dev/null
 
 exps=("$@")
-((${#exps[@]})) || exps=(v0 v2 v3 v4seq v4tree cas syncmap k fast)
+((${#exps[@]})) || exps=(v0 v2 v3 v4seq v4tree cas syncmap k std)
 
 for exp in "${exps[@]}"; do
   case $exp in
     v0) measure -v v0 ;;
     k) for kk in $ks; do measure -v v3 -p "$kp" -k "$kk"; done ;;
-    fast) measure -v v0 -tokenizer fast && measure -v v4tree -p "$kp" -tokenizer fast ;;
+    std) measure -v v0 -tokenizer std && measure -v v4tree -p "$kp" -tokenizer std ;;
     *) for p in $threads; do measure -v "$exp" -p "$p" -k "$k"; done ;;
   esac
 done

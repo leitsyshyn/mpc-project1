@@ -25,13 +25,12 @@ func TestAdd(t *testing.T) {
 	}
 
 	if len(ix) != 2 {
-		t.Fatalf("len = %d, want 2", len(ix))
+		t.Errorf("index has %d words, want 2", len(ix))
 	}
-	cat := ix["cat"]
-	if cat.Total != 3 || !maps.Equal(cat.Docs, map[int]int{0: 2, 2: 1}) {
+	if cat := ix["cat"]; cat == nil || cat.Total != 3 || !maps.Equal(cat.Docs, map[int]int{0: 2, 2: 1}) {
 		t.Errorf("cat = %+v, want total 3, docs {0:2 2:1}", cat)
 	}
-	if dog := ix["dog"]; dog.Total != 1 || !maps.Equal(dog.Docs, map[int]int{1: 1}) {
+	if dog := ix["dog"]; dog == nil || dog.Total != 1 || !maps.Equal(dog.Docs, map[int]int{1: 1}) {
 		t.Errorf("dog = %+v, want total 1, docs {1:1}", dog)
 	}
 }
@@ -67,7 +66,7 @@ func TestMerge(t *testing.T) {
 		"src":  {Total: 1, Docs: map[int]int{3: 1}},
 	}
 	if len(dst) != len(want) {
-		t.Fatalf("merged %d words, want %d", len(dst), len(want))
+		t.Errorf("merged %d words, want %d", len(dst), len(want))
 	}
 	for word, w := range want {
 		if e := dst[word]; e == nil || e.Total != w.Total || !maps.Equal(e.Docs, w.Docs) {

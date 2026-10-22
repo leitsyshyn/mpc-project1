@@ -46,6 +46,16 @@ func zipfCorpus(docs int) [][]byte {
 	return texts
 }
 
+func firstDiff(got, want string) string {
+	g, w := strings.Split(got, "\n"), strings.Split(want, "\n")
+	for i := range min(len(g), len(w)) {
+		if g[i] != w[i] {
+			return fmt.Sprintf("line %d = %q, want %q", i+1, g[i], w[i])
+		}
+	}
+	return fmt.Sprintf("%d lines, want %d", len(g), len(w))
+}
+
 func build(t *testing.T, version string, texts [][]byte, o Options) []Index {
 	t.Helper()
 	b, err := Version(version)
@@ -78,9 +88,9 @@ func TestCorrectVersionsMatchV0(t *testing.T) {
 	for _, v := range correctVersions {
 		for _, p := range []int{1, 2, 3, 8, 100} {
 			for _, k := range []int{1, 7, 4096} {
-				t.Run(fmt.Sprintf("%s/p=%d/k=%d", v, p, k), func(t *testing.T) {
+				t.Run(fmt.Sprintf("%s_p%d_k%d", v, p, k), func(t *testing.T) {
 					if got := write(t, build(t, v, texts, Options{Threads: p, Stripes: k})...); got != want {
-						t.Errorf("output differs from v0")
+						t.Errorf("%s differs from v0: %s", v, firstDiff(got, want))
 					}
 				})
 			}
@@ -88,12 +98,12 @@ func TestCorrectVersionsMatchV0(t *testing.T) {
 	}
 }
 
-func TestFastWordsGivesSameIndex(t *testing.T) {
+func TestTokenizersGiveSameIndex(t *testing.T) {
 	texts := zipfCorpus(60)
 	want := write(t, build(t, "v0", texts, Options{})...)
 	for _, v := range append([]string{"v0"}, correctVersions...) {
-		if got := write(t, build(t, v, texts, Options{Threads: 4, Stripes: 64, Tokenize: FastWords})...); got != want {
-			t.Errorf("%s with FastWords differs from v0 with Words", v)
+		if got := write(t, build(t, v, texts, Options{Threads: 4, Stripes: 64, Tokenize: Words})...); got != want {
+			t.Errorf("%s with Words differs from v0 with FastWords: %s", v, firstDiff(got, want))
 		}
 	}
 }
@@ -101,13 +111,13 @@ func TestFastWordsGivesSameIndex(t *testing.T) {
 func TestV3PartsAreDisjoint(t *testing.T) {
 	parts := build(t, "v3", zipfCorpus(20), Options{Threads: 4, Stripes: 16})
 	if len(parts) != 16 {
-		t.Fatalf("got %d parts, want one per stripe", len(parts))
+		t.Fatalf("v3 with 16 stripes returned %d parts, want 16", len(parts))
 	}
 	seen := map[string]int{}
 	for i, ix := range parts {
 		for word := range ix {
 			if j, ok := seen[word]; ok {
-				t.Fatalf("word %q is in parts %d and %d", word, j, i)
+				t.Errorf("word %q is in parts %d and %d", word, j, i)
 			}
 			seen[word] = i
 		}
@@ -134,7 +144,7 @@ func TestV1SingleThreadIsCorrect(t *testing.T) {
 	texts := zipfCorpus(20)
 	want := write(t, build(t, "v0", texts, Options{})...)
 	if got := write(t, build(t, "v1", texts, Options{Threads: 1})...); got != want {
-		t.Error("v1 with one thread differs from v0")
+		t.Errorf("v1 with one thread differs from v0: %s", firstDiff(got, want))
 	}
 }
 
@@ -147,14 +157,15 @@ func TestV1OnlyLosesUpdates(t *testing.T) {
 	for word, e := range build(t, "v1", texts, Options{Threads: 8})[0] {
 		w := want[word]
 		if w == nil {
-			t.Fatalf("v1 invented word %q", word)
+			t.Errorf("v1 invented word %q", word)
+			continue
 		}
 		if e.Total > w.Total {
-			t.Errorf("%q: total %d > %d", word, e.Total, w.Total)
+			t.Errorf("v1 total of %q = %d, want at most %d", word, e.Total, w.Total)
 		}
 		for doc, n := range e.Docs {
 			if n > w.Docs[doc] {
-				t.Errorf("%q in doc %d: %d > %d", word, doc, n, w.Docs[doc])
+				t.Errorf("v1 count of %q in doc %d = %d, want at most %d", word, doc, n, w.Docs[doc])
 			}
 		}
 	}

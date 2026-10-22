@@ -24,8 +24,14 @@ func Load(dir string) ([][]byte, error) {
 			return nil
 		}
 		text, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
 		texts = append(texts, text)
-		return err
+		return nil
 	})
-	return texts, err
+	if err != nil {
+		return nil, err
+	}
+	return texts, nil
 }

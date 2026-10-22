@@ -17,20 +17,19 @@ func TestSummarize(t *testing.T) {
 		return ds
 	}
 	tests := []struct {
-		name             string
-		in               []time.Duration
-		median, min, max time.Duration
+		name string
+		in   []time.Duration
+		want Summary
 	}{
-		{"odd", ms(5, 1, 3), 3 * time.Millisecond, 1 * time.Millisecond, 5 * time.Millisecond},
-		{"even", ms(4, 1, 3, 2), 2500 * time.Microsecond, 1 * time.Millisecond, 4 * time.Millisecond},
-		{"single", ms(7), 7 * time.Millisecond, 7 * time.Millisecond, 7 * time.Millisecond},
+		{name: "odd", in: ms(5, 1, 3), want: Summary{Median: 3 * time.Millisecond, Min: time.Millisecond, Max: 5 * time.Millisecond}},
+		{name: "even", in: ms(4, 1, 3, 2), want: Summary{Median: 2500 * time.Microsecond, Min: time.Millisecond, Max: 4 * time.Millisecond}},
+		{name: "single", in: ms(7), want: Summary{Median: 7 * time.Millisecond, Min: 7 * time.Millisecond, Max: 7 * time.Millisecond}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			orig := slices.Clone(tt.in)
-			got := Summarize(tt.in)
-			if got.Median != tt.median || got.Min != tt.min || got.Max != tt.max {
-				t.Errorf("Summarize(%v) = %+v, want median %v min %v max %v", tt.in, got, tt.median, tt.min, tt.max)
+			if got := Summarize(tt.in); got != tt.want {
+				t.Errorf("Summarize(%v) = %+v, want %+v", tt.in, got, tt.want)
 			}
 			if !slices.Equal(tt.in, orig) {
 				t.Errorf("Summarize reordered its input: %v", tt.in)

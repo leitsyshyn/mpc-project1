@@ -30,7 +30,7 @@ go build -trimpath -o bin/ ./cmd/...
 conditions start
 
 echo "== index versions"
-scripts/bench.sh v0 v2 v3 v4seq v4tree cas syncmap k fast
+scripts/bench.sh v0 v2 v3 v4seq v4tree cas syncmap k std
 
 echo "== false sharing"
 bin/falseshare -csv results.csv

@@ -68,6 +68,7 @@ func BenchmarkWords(b *testing.B) {
 	text := []byte("The quick brown Fox jumps over the lazy dog. Швидка руда лисиця! ")
 	for name, words := range tokenizers {
 		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
 			b.SetBytes(int64(len(text)))
 			for b.Loop() {
 				for range words(text) {
@@ -109,6 +110,7 @@ func BenchmarkWordsCorpus(b *testing.B) {
 	text := slices.Concat(texts[:min(20, len(texts))]...)
 	for name, words := range tokenizers {
 		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
 			b.SetBytes(int64(len(text)))
 			for b.Loop() {
 				for range words(text) {

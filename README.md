@@ -57,7 +57,7 @@ bin/invindex -v v0 -in data -out v0.tsv -csv results.csv
 | `-repeat` | `5`         | timed runs                                      |
 | `-csv`    | none        | append per-run timings to this CSV file         |
 | `-cpuprofile` | none    | write a CPU profile of the timed runs (`go tool pprof`) |
-| `-tokenizer` | `simple` | `simple` (`Words`) or `fast` (`FastWords`, SWAR); a non-default tokenizer is recorded as e.g. `v0-fast` |
+| `-tokenizer` | `swar` | `swar` (`FastWords`, SWAR-optimized) or `std` (`Words`, standard library); a non-default tokenizer is recorded as e.g. `v0-std` |
 
 V4 also reports its merge phase, recorded in the CSV as `v4seq-merge` /
 `v4tree-merge`. The tool also prints the total number of occurrences, which is how V1's lost
@@ -76,7 +76,7 @@ scripts/final.sh            # log in results/final.log
 It runs the following steps, which can also be run one by one:
 
 ```sh
-scripts/bench.sh v0 v2 v3 v4seq v4tree cas syncmap k fast   # scaling over P, V3 over K, FastWords; appended to results.csv
+scripts/bench.sh v0 v2 v3 v4seq v4tree cas syncmap k std    # scaling over P, V3 over K, Words vs FastWords; appended to results.csv
 scripts/v1-lost-updates.sh 2 4 8 10 > results/v1-lost-updates.csv   # 10 V1 runs per thread count vs V0
 bin/invindex -out v0.tsv && scripts/zipf.py v0.tsv                  # top-20 words' share of updates, per-K lock load
 scripts/merge_cost.py v0.tsv 8              # work per step of V4's two merge schemes

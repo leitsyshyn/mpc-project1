@@ -8,7 +8,6 @@ import (
 	"io"
 	"slices"
 	"strconv"
-	"strings"
 )
 
 // Entry holds a word's number of occurrences in the corpus and per document.
@@ -19,6 +18,8 @@ type Entry struct {
 
 // Index maps each word to its entry.
 type Index map[string]*Entry
+
+const allDocs = -1
 
 // Add records one occurrence of word in document doc. It does not retain word.
 func (ix Index) Add(word []byte, doc int) {
@@ -47,6 +48,19 @@ func (ix Index) merge(src Index) {
 	}
 }
 
+func (ix Index) addCount(word string, doc, n int) {
+	e := ix[word]
+	if e == nil {
+		e = newEntry()
+		ix[word] = e
+	}
+	if doc == allDocs {
+		e.Total += n
+	} else {
+		e.Docs[doc] += n
+	}
+}
+
 // Occurrences returns the total number of word occurrences in the parts.
 func Occurrences(parts ...Index) int {
 	n := 0
@@ -71,13 +85,17 @@ func Write(w io.Writer, parts ...Index) error {
 	}
 	type posting struct{ doc, n int }
 
-	var lines []line
+	n := 0
+	for _, ix := range parts {
+		n += len(ix)
+	}
+	lines := make([]line, 0, n)
 	for _, ix := range parts {
 		for word, e := range ix {
-			lines = append(lines, line{word, e})
+			lines = append(lines, line{word: word, Entry: e})
 		}
 	}
-	slices.SortFunc(lines, func(a, b line) int { return strings.Compare(a.word, b.word) })
+	slices.SortFunc(lines, func(a, b line) int { return cmp.Compare(a.word, b.word) })
 
 	bw := bufio.NewWriterSize(w, 1<<20)
 	var buf []byte
@@ -85,7 +103,7 @@ func Write(w io.Writer, parts ...Index) error {
 	for _, l := range lines {
 		ps = ps[:0]
 		for doc, n := range l.Docs {
-			ps = append(ps, posting{doc, n})
+			ps = append(ps, posting{doc: doc, n: n})
 		}
 		slices.SortFunc(ps, func(a, b posting) int {
 			return cmp.Or(cmp.Compare(b.n, a.n), cmp.Compare(a.doc, b.doc))

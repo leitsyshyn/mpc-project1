@@ -1,6 +1,7 @@
 package index
 
 import (
+	"bytes"
 	"encoding/binary"
 	"iter"
 	"math/bits"
@@ -8,11 +9,15 @@ import (
 	"unicode/utf8"
 )
 
-// TokenizeFunc splits a text into normalized words. The yielded slice is only
-// valid until the next iteration.
+// TokenizeFunc splits a text into normalized words. It must be safe for
+// concurrent use, and the yielded slice is only valid until the next iteration.
 type TokenizeFunc func(text []byte) iter.Seq[[]byte]
 
-const minLen = 3
+const (
+	minLen = 3
+	ones   = 0x0101010101010101
+	high   = 0x8080808080808080
+)
 
 var tokenByte = func() (t [utf8.RuneSelf]byte) {
 	for c := range byte(utf8.RuneSelf) {
@@ -32,35 +37,24 @@ var tokenByte = func() (t [utf8.RuneSelf]byte) {
 func Words(text []byte) iter.Seq[[]byte] {
 	return func(yield func([]byte) bool) {
 		word := make([]byte, 0, 64)
-		runes := 0
-		flush := func() bool {
-			ok := runes < minLen || yield(word)
-			word, runes = word[:0], 0
-			return ok
-		}
-		for i := 0; i < len(text); {
-			if c := text[i]; c < utf8.RuneSelf {
-				i++
-				if l := tokenByte[c]; l != 0 {
-					word, runes = append(word, l), runes+1
-				} else if !flush() {
-					return
-				}
+		for field := range bytes.FieldsFuncSeq(text, isSeparator) {
+			if utf8.RuneCount(field) < minLen {
 				continue
 			}
-			r, size := utf8.DecodeRune(text[i:])
-			i += size
-			if unicode.IsLetter(r) || unicode.IsDigit(r) {
-				word, runes = utf8.AppendRune(word, unicode.ToLower(r)), runes+1
-			} else if !flush() {
+			word = word[:0]
+			for _, r := range string(field) {
+				word = utf8.AppendRune(word, unicode.ToLower(r))
+			}
+			if !yield(word) {
 				return
 			}
 		}
-		flush()
 	}
 }
 
-// FastWords yields the same words as Words. It classifies ASCII eight bytes at
+func isSeparator(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }
+
+// FastWords yields the same words as [Words]. It classifies ASCII eight bytes at
 // a time within a uint64 (SWAR) and yields words that are already lowercase
 // ASCII as subslices of text without copying them.
 func FastWords(text []byte) iter.Seq[[]byte] {
@@ -128,11 +122,6 @@ func appendRunes(word, text []byte, i int) (_ []byte, runes, end int) {
 	}
 	return word, runes, i
 }
-
-const (
-	ones = 0x0101010101010101
-	high = 0x8080808080808080
-)
 
 func classify(w uint64) (tok, upper uint64) {
 	folded := w | 0x20*ones

@@ -13,6 +13,9 @@ import (
 	"time"
 )
 
+// Header is the header of results.csv.
+var Header = []string{"program", "version", "threads", "k", "run", "seconds"}
+
 // Measure runs fn warmup times untimed, then repeat times timed, collecting
 // garbage before every run, and returns the timed durations.
 func Measure(warmup, repeat int, fn func()) []time.Duration {
@@ -40,12 +43,10 @@ func Summarize(times []time.Duration) Summary {
 	return Summary{Median: (s[(n-1)/2] + s[n/2]) / 2, Min: s[0], Max: s[n-1]}
 }
 
+// String formats s as "median M (min A, max B)".
 func (s Summary) String() string {
 	return fmt.Sprintf("median %v (min %v, max %v)", s.Median, s.Min, s.Max)
 }
-
-// Header is the header of results.csv.
-var Header = []string{"program", "version", "threads", "k", "run", "seconds"}
 
 // Rows formats the timings of one configuration as results.csv rows, leaving
 // the k column empty when k is 0.
@@ -56,23 +57,32 @@ func Rows(program, version string, threads, k int, times []time.Duration) [][]st
 	}
 	rows := make([][]string, len(times))
 	for i, d := range times {
-		rows[i] = []string{program, version, strconv.Itoa(threads), ks, strconv.Itoa(i + 1), fmt.Sprintf("%.6f", d.Seconds())}
+		rows[i] = []string{
+			program,
+			version,
+			strconv.Itoa(threads),
+			ks,
+			strconv.Itoa(i + 1),
+			strconv.FormatFloat(d.Seconds(), 'f', 6, 64),
+		}
 	}
 	return rows
 }
 
-// AppendCSV appends rows to the CSV file at path, starting a new file with Header.
-func AppendCSV(path string, rows [][]string) error {
+// AppendCSV appends rows to the CSV file at path, starting a new file with
+// [Header].
+func AppendCSV(path string, rows [][]string) (err error) {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
 	if err != nil {
 		return err
 	}
+	defer func() { err = errors.Join(err, f.Close()) }()
 	info, err := f.Stat()
 	if err != nil {
-		return errors.Join(err, f.Close())
+		return err
 	}
 	if info.Size() == 0 {
 		rows = append([][]string{Header}, rows...)
 	}
-	return errors.Join(csv.NewWriter(f).WriteAll(rows), f.Close())
+	return csv.NewWriter(f).WriteAll(rows)
 }

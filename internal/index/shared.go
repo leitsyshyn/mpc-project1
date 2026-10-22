@@ -12,7 +12,7 @@ type sharedTable interface {
 	index() Index
 }
 
-func shared[T sharedTable](newTable func(texts [][]byte) T) BuildFunc {
+func shared(newTable func(texts [][]byte) sharedTable) BuildFunc {
 	return func(texts [][]byte, o Options) []Index {
 		t := newTable(texts)
 		parallel(texts, o, func(_, doc int) {
@@ -22,33 +22,6 @@ func shared[T sharedTable](newTable func(texts [][]byte) T) BuildFunc {
 		})
 		return []Index{t.index()}
 	}
-}
-
-const allDocs = -1
-
-func (ix Index) addCount(word string, doc, n int) {
-	e := ix[word]
-	if e == nil {
-		e = newEntry()
-		ix[word] = e
-	}
-	if doc == allDocs {
-		e.Total += n
-	} else {
-		e.Docs[doc] += n
-	}
-}
-
-func bucketCount(texts [][]byte) int {
-	size := 0
-	for _, text := range texts {
-		size += len(text)
-	}
-	return 1 << bits.Len(uint(size/64))
-}
-
-func bucket(hash uint64, doc, buckets int) int {
-	return int((hash + uint64(doc+1)*0x9e3779b97f4a7c15) & uint64(buckets-1))
 }
 
 type racyTable struct {
@@ -63,7 +36,7 @@ type racyNode struct {
 	next  *racyNode
 }
 
-func newRacyTable(texts [][]byte) *racyTable {
+func newRacyTable(texts [][]byte) sharedTable {
 	return &racyTable{buckets: make([]*racyNode, bucketCount(texts))}
 }
 
@@ -106,7 +79,7 @@ type casNode struct {
 	next  *casNode
 }
 
-func newCASTable(texts [][]byte) *casTable {
+func newCASTable(texts [][]byte) sharedTable {
 	return &casTable{buckets: make([]atomic.Pointer[casNode], bucketCount(texts))}
 }
 
@@ -157,12 +130,12 @@ type wordDoc struct {
 	doc  int
 }
 
-func newSyncMapTable([][]byte) *syncMapTable { return &syncMapTable{} }
+func newSyncMapTable([][]byte) sharedTable { return &syncMapTable{} }
 
 func (t *syncMapTable) add(word []byte, doc int) {
 	w := string(word)
-	t.inc(wordDoc{w, doc})
-	t.inc(wordDoc{w, allDocs})
+	t.inc(wordDoc{word: w, doc: doc})
+	t.inc(wordDoc{word: w, doc: allDocs})
 }
 
 func (t *syncMapTable) inc(key wordDoc) {
@@ -181,4 +154,16 @@ func (t *syncMapTable) index() Index {
 		return true
 	})
 	return ix
+}
+
+func bucketCount(texts [][]byte) int {
+	size := 0
+	for _, text := range texts {
+		size += len(text)
+	}
+	return 1 << bits.Len(uint(size/64))
+}
+
+func bucket(hash uint64, doc, buckets int) int {
+	return int((hash + uint64(doc+1)*0x9e3779b97f4a7c15) & uint64(buckets-1))
 }

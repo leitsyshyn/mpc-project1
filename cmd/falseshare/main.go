@@ -17,10 +17,16 @@ import (
 	"concurrent/internal/bench"
 )
 
-const align = 128
+const cacheLine = 128
+
+var errUsage = errors.New("usage")
 
 func main() {
-	if err := run(os.Args[1:], os.Stderr); err != nil {
+	switch err := run(os.Args[1:], os.Stderr); {
+	case err == nil, errors.Is(err, flag.ErrHelp):
+	case errors.Is(err, errUsage):
+		os.Exit(2)
+	default:
 		fmt.Fprintln(os.Stderr, "falseshare:", err)
 		os.Exit(1)
 	}
@@ -36,7 +42,7 @@ func run(args []string, log io.Writer) error {
 	repeat := fs.Int("repeat", 5, "timed runs")
 	csvPath := fs.String("csv", "", "append the timings to this CSV file")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 
 	threads, err := positiveInts(*threadsList)
@@ -61,7 +67,7 @@ func run(args []string, log io.Writer) error {
 			times := bench.Measure(*warmup, *repeat, func() { increment(counters(p, stride), *n) })
 			fmt.Fprintf(log, "stride %3d B, p=%d: %v\n", stride, p, bench.Summarize(times))
 			if *csvPath != "" {
-				rows := bench.Rows("falseshare", fmt.Sprintf("stride-%d", stride), p, 0, times)
+				rows := bench.Rows("falseshare", "stride-"+strconv.Itoa(stride), p, 0, times)
 				if err := bench.AppendCSV(*csvPath, rows); err != nil {
 					return err
 				}
@@ -73,8 +79,8 @@ func run(args []string, log io.Writer) error {
 
 func counters(p, stride int) []*int64 {
 	words := stride / 8
-	buf := make([]int64, p*words+align/8)
-	skip := int((align - uintptr(unsafe.Pointer(&buf[0]))%align) % align / 8)
+	buf := make([]int64, p*words+cacheLine/8)
+	skip := int((cacheLine - uintptr(unsafe.Pointer(&buf[0]))%cacheLine) % cacheLine / 8)
 	cs := make([]*int64, p)
 	for i := range cs {
 		cs[i] = &buf[skip+i*words]
