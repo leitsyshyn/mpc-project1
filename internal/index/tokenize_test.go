@@ -1,6 +1,7 @@
 package index
 
 import (
+	"iter"
 	"slices"
 	"strings"
 	"testing"
@@ -8,13 +9,18 @@ import (
 	"unicode/utf8"
 )
 
-func collect(text string) []string {
+func collect(text string) []string { return collectWith(Words, text) }
+
+func collectWith(words func([]byte) iter.Seq[[]byte], text string) []string {
 	var got []string
-	for w := range Words([]byte(text)) {
+	for w := range words([]byte(text)) {
 		got = append(got, string(w))
 	}
 	return got
 }
+
+// tokenizers lists the implementations that must follow the normalization rules.
+var tokenizers = map[string]func([]byte) iter.Seq[[]byte]{"Words": Words, "FastWords": FastWords}
 
 func TestWords(t *testing.T) {
 	tests := []struct {
@@ -51,24 +57,30 @@ func TestWords(t *testing.T) {
 }
 
 func TestWordsStopsEarly(t *testing.T) {
-	var got []string
-	for w := range Words([]byte("one two three four")) {
-		got = append(got, string(w))
-		if len(got) == 2 {
-			break
+	for name, words := range tokenizers {
+		var got []string
+		for w := range words([]byte("one Two три four")) {
+			got = append(got, string(w))
+			if len(got) == 3 {
+				break
+			}
 		}
-	}
-	if want := []string{"one", "two"}; !slices.Equal(got, want) {
-		t.Errorf("got %q, want %q", got, want)
+		if want := []string{"one", "two", "три"}; !slices.Equal(got, want) {
+			t.Errorf("%s: got %q, want %q", name, got, want)
+		}
 	}
 }
 
 func BenchmarkWords(b *testing.B) {
 	text := []byte("The quick brown Fox jumps over the lazy dog. Швидка руда лисиця! ")
-	b.SetBytes(int64(len(text)))
-	for b.Loop() {
-		for range Words(text) {
-		}
+	for name, words := range tokenizers {
+		b.Run(name, func(b *testing.B) {
+			b.SetBytes(int64(len(text)))
+			for b.Loop() {
+				for range words(text) {
+				}
+			}
+		})
 	}
 }
 
@@ -88,8 +100,50 @@ func FuzzWords(f *testing.F) {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, text string) {
-		if got, want := collect(text), naiveWords(text); !slices.Equal(got, want) {
-			t.Errorf("Words(%q) = %q, want %q", text, got, want)
+		want := naiveWords(text)
+		for name, words := range tokenizers {
+			if got := collectWith(words, text); !slices.Equal(got, want) {
+				t.Errorf("%s(%q) = %q, want %q", name, text, got, want)
+			}
 		}
 	})
+}
+
+// BenchmarkWordsCorpus tokenizes the first books of the real corpus, if present.
+func BenchmarkWordsCorpus(b *testing.B) {
+	docs, err := Load("../../data")
+	if err != nil || len(docs) == 0 {
+		b.Skip("no corpus in data/")
+	}
+	var text []byte
+	for _, d := range docs[:min(20, len(docs))] {
+		text = append(text, d.Text...)
+	}
+	for name, words := range tokenizers {
+		b.Run(name, func(b *testing.B) {
+			b.SetBytes(int64(len(text)))
+			for b.Loop() {
+				for range words(text) {
+				}
+			}
+		})
+	}
+}
+
+func TestClassify(t *testing.T) {
+	for c := range byte(utf8.RuneSelf) {
+		for pos := range 8 {
+			// c at one position among bytes of both classes.
+			w := uint64(0x41_2e_61_20_39_5f_7a_2d) &^ (0xff << (8 * pos))
+			w |= uint64(c) << (8 * pos)
+			tok, upper := classify(w)
+			bit := uint64(0x80) << (8 * pos)
+			if got, want := tok&bit != 0, ascii[c] != 0; got != want {
+				t.Errorf("classify: byte %q at %d: token = %v, want %v", c, pos, got, want)
+			}
+			if got, want := upper&bit != 0, 'A' <= c && c <= 'Z'; got != want {
+				t.Errorf("classify: byte %q at %d: upper = %v, want %v", c, pos, got, want)
+			}
+		}
+	}
 }

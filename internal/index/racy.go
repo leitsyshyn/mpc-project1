@@ -17,8 +17,7 @@ import (
 // Each word has a node with its total (doc == allDocs) and a node per document
 // it occurs in, mirroring Entry.Total and Entry.Docs.
 type racyTable struct {
-	buckets []*node
-	mask    uint64
+	buckets []*node // len is a power of two
 }
 
 type node struct {
@@ -31,11 +30,35 @@ type node struct {
 
 const allDocs = -1
 
-// newRacyTable sizes the table to one bucket per 64 bytes of input, which
-// keeps chains short for natural text.
-func newRacyTable(size int) *racyTable {
-	n := 1 << bits.Len(uint(size/64))
-	return &racyTable{buckets: make([]*node, n), mask: uint64(n - 1)}
+// bucketCount sizes the fixed-size tables of V1 and the lock-free version: a
+// power of two near one bucket per 64 bytes of input, which keeps chains short
+// for natural text.
+func bucketCount(texts [][]byte) int {
+	size := 0
+	for _, text := range texts {
+		size += len(text)
+	}
+	return 1 << bits.Len(uint(size/64))
+}
+
+// bucket returns the bucket of the node for word hash h and document doc.
+func bucket(h uint64, doc, buckets int) int {
+	return int((h + uint64(doc+1)*0x9e3779b97f4a7c15) & uint64(buckets-1))
+}
+
+// addCount adds n occurrences of word in doc, or n to its total if doc is
+// allDocs, to an index being assembled from table nodes.
+func (ix Index) addCount(word string, doc, n int) {
+	e := ix[word]
+	if e == nil {
+		e = &Entry{Docs: map[int]int{}}
+		ix[word] = e
+	}
+	if doc == allDocs {
+		e.Total += n
+	} else {
+		e.Docs[doc] += n
+	}
 }
 
 func (t *racyTable) add(word []byte, doc int) {
@@ -45,7 +68,7 @@ func (t *racyTable) add(word []byte, doc int) {
 }
 
 func (t *racyTable) inc(h uint64, word []byte, doc int) {
-	b := &t.buckets[(h+uint64(doc+1)*0x9e3779b97f4a7c15)&t.mask]
+	b := &t.buckets[bucket(h, doc, len(t.buckets))]
 	for nd := *b; nd != nil; nd = nd.next {
 		if nd.hash == h && nd.doc == doc {
 			nd.n++ // DATA RACE: load, add, store; a concurrent increment between them is lost
@@ -60,16 +83,7 @@ func (t *racyTable) index() Index {
 	ix := Index{}
 	for _, nd := range t.buckets {
 		for ; nd != nil; nd = nd.next {
-			e := ix[nd.word]
-			if e == nil {
-				e = &Entry{Docs: map[int]int{}}
-				ix[nd.word] = e
-			}
-			if nd.doc == allDocs {
-				e.Total += nd.n
-			} else {
-				e.Docs[nd.doc] += nd.n
-			}
+			ix.addCount(nd.word, nd.doc, nd.n)
 		}
 	}
 	return ix

@@ -84,6 +84,21 @@ func TestRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A non-default tokenizer is recorded in the version name.
+	if err := run([]string{"-v", "v0", "-tokenizer", "fast", "-in", in, "-out", out, "-repeat", "1", "-csv", csv}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(out); string(got) != "hello\t2\tdoc0:2\nworld\t2\tdoc0:1,doc1:1\n" {
+		t.Errorf("index with the fast tokenizer =\n%s", got)
+	}
+	rows, err = os.ReadFile(csv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(rows), "\ninvindex,v0-fast,1,,1,") {
+		t.Errorf("csv has no v0-fast row:\n%s", rows)
+	}
+
 	merges := strings.Count(string(rows), "\ninvindex,v4tree-merge,2,,")
 	builds := strings.Count(string(rows), "\ninvindex,v4tree,2,,")
 	if merges != 2 || builds != 2 {
@@ -97,6 +112,7 @@ func TestRunRejectsBadArgs(t *testing.T) {
 		{"-repeat", "0"},
 		{"-p", "0"},
 		{"-v", "v3", "-k", "0"},
+		{"-tokenizer", "regex"},
 		{"-in", filepath.Join(t.TempDir(), "missing")},
 	} {
 		if err := run(args, io.Discard); err == nil {

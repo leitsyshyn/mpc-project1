@@ -71,7 +71,7 @@ func TestUnknownVersion(t *testing.T) {
 }
 
 // correct lists the versions whose output must match V0 byte for byte.
-var correct = []string{"v2", "v3", "v4seq", "v4tree"}
+var correct = []string{"v2", "v3", "v4seq", "v4tree", "cas", "syncmap"}
 
 func TestCorrectVersionsMatchV0(t *testing.T) {
 	texts := zipfCorpus(60)
@@ -85,6 +85,16 @@ func TestCorrectVersionsMatchV0(t *testing.T) {
 					}
 				})
 			}
+		}
+	}
+}
+
+func TestFastTokenizerGivesSameIndex(t *testing.T) {
+	texts := zipfCorpus(60)
+	want := write(t, build(t, "v0", texts, Options{})...)
+	for _, v := range append([]string{"v0"}, correct...) {
+		if got := write(t, build(t, v, texts, Options{Threads: 4, Stripes: 64, Tokenize: FastWords})...); got != want {
+			t.Errorf("%s with FastWords differs from v0 with Words", v)
 		}
 	}
 }

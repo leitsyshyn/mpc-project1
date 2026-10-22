@@ -5,6 +5,7 @@ package index
 import (
 	"fmt"
 	"hash/maphash"
+	"iter"
 	"maps"
 	"slices"
 	"strings"
@@ -20,6 +21,16 @@ type Options struct {
 
 	// Merge, if set, receives the duration of V4's merge phase.
 	Merge *time.Duration
+
+	// Tokenize splits a document into words; nil means Words.
+	Tokenize func(text []byte) iter.Seq[[]byte]
+}
+
+func (o Options) words(text []byte) iter.Seq[[]byte] {
+	if o.Tokenize == nil {
+		return Words(text)
+	}
+	return o.Tokenize(text)
 }
 
 // BuildFunc builds the index of texts, where texts[i] is document i. The result
@@ -37,6 +48,8 @@ var versions = map[string]BuildFunc{
 	"v4tree": func(texts [][]byte, o Options) []Index {
 		return localThenMerge(texts, o, mergeTree)
 	},
+	"cas":     lockFree,
+	"syncmap": syncMapBuild,
 }
 
 // seed keys the hash that picks V1's buckets and V3's stripes.
@@ -59,10 +72,10 @@ func Version(name string) (BuildFunc, error) {
 }
 
 // sequential is V0: one goroutine and no synchronization.
-func sequential(texts [][]byte, _ Options) []Index {
+func sequential(texts [][]byte, o Options) []Index {
 	ix := Index{}
 	for doc, text := range texts {
-		for w := range Words(text) {
+		for w := range o.words(text) {
 			ix.Add(w, doc)
 		}
 	}
@@ -88,13 +101,9 @@ func parallel(texts [][]byte, o Options, work func(worker, doc int)) {
 // unsynchronized is V1: goroutines update one shared index without any mutual
 // exclusion, so concurrent updates get lost. See racyTable.
 func unsynchronized(texts [][]byte, o Options) []Index {
-	size := 0
-	for _, text := range texts {
-		size += len(text)
-	}
-	t := newRacyTable(size)
+	t := &racyTable{buckets: make([]*node, bucketCount(texts))}
 	parallel(texts, o, func(_, doc int) {
-		for w := range Words(texts[doc]) {
+		for w := range o.words(texts[doc]) {
 			t.add(w, doc)
 		}
 	})
@@ -107,7 +116,7 @@ func singleLock(texts [][]byte, o Options) []Index {
 	ix := Index{}
 	var mu sync.Mutex
 	parallel(texts, o, func(_, doc int) {
-		for w := range Words(texts[doc]) {
+		for w := range o.words(texts[doc]) {
 			mu.Lock()
 			ix.Add(w, doc)
 			mu.Unlock()
@@ -132,7 +141,7 @@ func striped(texts [][]byte, o Options) []Index {
 		stripes[i].ix = Index{}
 	}
 	parallel(texts, o, func(_, doc int) {
-		for w := range Words(texts[doc]) {
+		for w := range o.words(texts[doc]) {
 			s := &stripes[maphash.Bytes(seed, w)%uint64(len(stripes))]
 			s.mu.Lock()
 			s.ix.Add(w, doc)
@@ -155,7 +164,7 @@ func localThenMerge(texts [][]byte, o Options, merge func([]Index) Index) []Inde
 	}
 	parallel(texts, o, func(worker, doc int) {
 		ix := locals[worker]
-		for w := range Words(texts[doc]) {
+		for w := range o.words(texts[doc]) {
 			ix.Add(w, doc)
 		}
 	})

@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"iter"
 	"os"
 	"runtime/pprof"
 	"strings"
@@ -35,6 +36,7 @@ func run(args []string, log io.Writer) error {
 	repeat := fs.Int("repeat", 5, "timed runs")
 	csvPath := fs.String("csv", "", "append per-run timings to this CSV file")
 	cpuProfile := fs.String("cpuprofile", "", "write a CPU profile of the timed runs to this file")
+	tokenizer := fs.String("tokenizer", "simple", "tokenizer: simple (Words) or fast (FastWords)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -42,6 +44,15 @@ func run(args []string, log io.Writer) error {
 	build, err := index.Version(*version)
 	if err != nil {
 		return err
+	}
+	tokenizers := map[string]func([]byte) iter.Seq[[]byte]{"simple": index.Words, "fast": index.FastWords}
+	tokenize, ok := tokenizers[*tokenizer]
+	if !ok {
+		return fmt.Errorf("unknown tokenizer %q, want simple or fast", *tokenizer)
+	}
+	label := *version // the version as recorded in the CSV
+	if *tokenizer != "simple" {
+		label += "-" + *tokenizer
 	}
 	if *threads < 1 || *stripes < 1 || *repeat < 1 || *warmup < 0 {
 		return errors.New("-p, -k and -repeat must be positive and -warmup non-negative")
@@ -63,7 +74,7 @@ func run(args []string, log io.Writer) error {
 	// Only V4 sets merge; each run's merge time is recorded separately.
 	var merge time.Duration
 	var merges []time.Duration
-	opts := index.Options{Threads: *threads, Stripes: *stripes, Merge: &merge}
+	opts := index.Options{Threads: *threads, Stripes: *stripes, Merge: &merge, Tokenize: tokenize}
 	if *cpuProfile != "" {
 		f, err := os.Create(*cpuProfile)
 		if err != nil {
@@ -90,15 +101,15 @@ func run(args []string, log io.Writer) error {
 	if *version == "v3" {
 		k = *stripes
 	}
-	fmt.Fprintf(log, "%s p=%d k=%d: %v over %d runs\n", *version, *threads, k, bench.Summarize(times), *repeat)
+	fmt.Fprintf(log, "%s p=%d k=%d: %v over %d runs\n", label, *threads, k, bench.Summarize(times), *repeat)
 	if len(merges) > 0 {
 		fmt.Fprintf(log, "  of which merge: %v\n", bench.Summarize(merges))
 	}
 	fmt.Fprintf(log, "occurrences: %d\n", index.Occurrences(parts...))
 
 	if *csvPath != "" {
-		rows := bench.Rows("invindex", *version, *threads, k, times)
-		rows = append(rows, bench.Rows("invindex", *version+"-merge", *threads, k, merges)...)
+		rows := bench.Rows("invindex", label, *threads, k, times)
+		rows = append(rows, bench.Rows("invindex", label+"-merge", *threads, k, merges)...)
 		if err := bench.AppendCSV(*csvPath, bench.Header, rows); err != nil {
 			return err
 		}
