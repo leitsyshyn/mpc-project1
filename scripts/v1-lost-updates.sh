@@ -6,6 +6,7 @@
 # Usage: scripts/v1-lost-updates.sh [threads...]   (default: 8)
 # Env:   DIR (corpus, default: data), RUNS (default: 10), BIN (default: bin/invindex)
 set -euo pipefail
+export LC_ALL=C
 
 dir=${DIR:-data}
 runs=${RUNS:-10}
