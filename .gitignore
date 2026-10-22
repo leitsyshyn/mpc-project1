@@ -1,0 +1,20 @@
+# Build output
+/bin/
+
+# Text corpus (not included in the submission archive)
+/data/
+
+# Generated indexes and measurement results
+*.tsv
+/results/
+
+# Profiling and test artifacts
+*.test
+*.out
+*.prof
+
+.DS_Store
+.idea/
+
+# Assignment handout
+/Навчальний*.pdf
