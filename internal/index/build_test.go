@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 	"unsafe"
 )
 
@@ -70,7 +71,7 @@ func TestUnknownVersion(t *testing.T) {
 }
 
 // correct lists the versions whose output must match V0 byte for byte.
-var correct = []string{"v2", "v3"}
+var correct = []string{"v2", "v3", "v4seq", "v4tree"}
 
 func TestCorrectVersionsMatchV0(t *testing.T) {
 	texts := zipfCorpus(60)
@@ -100,6 +101,16 @@ func TestV3PartsAreDisjoint(t *testing.T) {
 				t.Fatalf("word %q is in parts %d and %d", word, j, i)
 			}
 			seen[word] = i
+		}
+	}
+}
+
+func TestV4ReportsMergeTime(t *testing.T) {
+	for _, v := range []string{"v4seq", "v4tree"} {
+		var merge time.Duration
+		build(t, v, zipfCorpus(20), Options{Threads: 4, Merge: &merge})
+		if merge <= 0 {
+			t.Errorf("%s: merge time = %v, want > 0", v, merge)
 		}
 	}
 }

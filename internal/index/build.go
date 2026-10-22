@@ -10,12 +10,16 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Options configures the parallel versions.
 type Options struct {
 	Threads int // worker goroutines
 	Stripes int // V3: number of locks K
+
+	// Merge, if set, receives the duration of V4's merge phase.
+	Merge *time.Duration
 }
 
 // BuildFunc builds the index of texts, where texts[i] is document i. The result
@@ -27,6 +31,12 @@ var versions = map[string]BuildFunc{
 	"v1": unsynchronized,
 	"v2": singleLock,
 	"v3": striped,
+	"v4seq": func(texts [][]byte, o Options) []Index {
+		return localThenMerge(texts, o, mergeSequential)
+	},
+	"v4tree": func(texts [][]byte, o Options) []Index {
+		return localThenMerge(texts, o, mergeTree)
+	},
 }
 
 // seed keys the hash that picks V1's buckets and V3's stripes.
@@ -134,4 +144,49 @@ func striped(texts [][]byte, o Options) []Index {
 		parts[i] = stripes[i].ix
 	}
 	return parts
+}
+
+// localThenMerge is V4: every goroutine builds its own index without
+// synchronization, then the local indexes are merged into one.
+func localThenMerge(texts [][]byte, o Options, merge func([]Index) Index) []Index {
+	locals := make([]Index, o.Threads)
+	for i := range locals {
+		locals[i] = Index{}
+	}
+	parallel(texts, o, func(worker, doc int) {
+		ix := locals[worker]
+		for w := range Words(texts[doc]) {
+			ix.Add(w, doc)
+		}
+	})
+
+	start := time.Now()
+	ix := merge(locals)
+	if o.Merge != nil {
+		*o.Merge = time.Since(start)
+	}
+	return []Index{ix}
+}
+
+// mergeSequential merges the local indexes one after another into the first:
+// P-1 sequential steps.
+func mergeSequential(locals []Index) Index {
+	for _, ix := range locals[1:] {
+		locals[0].merge(ix)
+	}
+	return locals[0]
+}
+
+// mergeTree merges the local indexes pairwise along a balanced binary tree:
+// each round merges disjoint pairs in parallel and halves the number of
+// indexes, so there are ceil(log2 P) sequential steps.
+func mergeTree(locals []Index) Index {
+	for step := 1; step < len(locals); step *= 2 {
+		var wg sync.WaitGroup
+		for i := 0; i+step < len(locals); i += 2 * step {
+			wg.Go(func() { locals[i].merge(locals[i+step]) })
+		}
+		wg.Wait()
+	}
+	return locals[0]
 }

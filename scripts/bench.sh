@@ -23,7 +23,7 @@ trap 'rm -rf "$tmp"' EXIT
 go build -trimpath -o bin/ ./cmd/...
 
 measure() {
-  "$bin" -in "$dir" -out "$tmp/index.tsv" -csv "$tmp/run.csv" "$@" 2>&1 | grep -E '^v[0-9]'
+  "$bin" -in "$dir" -out "$tmp/index.tsv" -csv "$tmp/run.csv" "$@" 2>&1 | grep -E '^v[0-9]|merge:'
   if ! cmp -s "$tmp/index.tsv" "$tmp/v0.tsv"; then
     echo "  output differs from v0, timings discarded" >&2
     rm -f "$tmp/run.csv"

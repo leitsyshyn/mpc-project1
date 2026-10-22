@@ -29,6 +29,22 @@ func (ix Index) Add(word []byte, doc int) {
 	e.Docs[doc]++
 }
 
+// merge adds the postings of src to ix. Entries of words missing from ix are
+// moved, not copied, so src must not be used afterwards.
+func (ix Index) merge(src Index) {
+	for word, e := range src {
+		d := ix[word]
+		if d == nil {
+			ix[word] = e
+			continue
+		}
+		d.Total += e.Total
+		for doc, n := range e.Docs {
+			d.Docs[doc] += n
+		}
+	}
+}
+
 // Occurrences returns the total number of word occurrences in the parts.
 func Occurrences(parts ...Index) int {
 	n := 0

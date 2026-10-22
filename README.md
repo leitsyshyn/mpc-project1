@@ -48,7 +48,7 @@ bin/invindex -v v0 -in data -out v0.tsv -csv results.csv
 
 | Flag      | Default     | Meaning                                         |
 | --------- | ----------- | ----------------------------------------------- |
-| `-v`      | `v0`        | version: `v0` sequential, `v1` unsynchronized, `v2` one mutex, `v3` K mutexes |
+| `-v`      | `v0`        | version: `v0` sequential, `v1` unsynchronized, `v2` one mutex, `v3` K mutexes, `v4seq` / `v4tree` local indexes merged sequentially / as a tree |
 | `-p`      | `1`         | number of worker goroutines (ignored by `v0`)   |
 | `-k`      | `1024`      | number of locks K (`v3` only)                   |
 | `-in`     | `data`      | corpus directory                                |
@@ -58,15 +58,17 @@ bin/invindex -v v0 -in data -out v0.tsv -csv results.csv
 | `-csv`    | none        | append per-run timings to this CSV file         |
 | `-cpuprofile` | none    | write a CPU profile of the timed runs (`go tool pprof`) |
 
-The tool also prints the total number of occurrences, which is how V1's lost
+V4 also reports its merge phase, recorded in the CSV as `v4seq-merge` /
+`v4tree-merge`. The tool also prints the total number of occurrences, which is how V1's lost
 updates are counted.
 
 ## Experiments
 
 ```sh
-scripts/bench.sh v0 v2 v3 k                 # scaling of V2/V3 over P and V3 over K, appended to results.csv
+scripts/bench.sh v0 v2 v3 v4seq v4tree k    # scaling over P and V3 over K, appended to results.csv
 scripts/v1-lost-updates.sh 2 4 8 10 > results/v1-lost-updates.csv   # 10 V1 runs per thread count vs V0
 bin/invindex -out v0.tsv && scripts/zipf.py v0.tsv                  # top-20 words' share of updates, per-K lock load
+scripts/merge_cost.py v0.tsv 8              # work per step of V4's two merge schemes
 uv run scripts/plots.py                     # graphs from results.csv into report/
 ```
 

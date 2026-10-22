@@ -10,6 +10,7 @@ import (
 	"os"
 	"runtime/pprof"
 	"strings"
+	"time"
 
 	"concurrent/internal/bench"
 	"concurrent/internal/index"
@@ -59,7 +60,10 @@ func run(args []string, log io.Writer) error {
 	}
 	fmt.Fprintf(log, "corpus: %d files, %.1f MiB\n", len(docs), float64(size)/(1<<20))
 
-	opts := index.Options{Threads: *threads, Stripes: *stripes}
+	// Only V4 sets merge; each run's merge time is recorded separately.
+	var merge time.Duration
+	var merges []time.Duration
+	opts := index.Options{Threads: *threads, Stripes: *stripes, Merge: &merge}
 	if *cpuProfile != "" {
 		f, err := os.Create(*cpuProfile)
 		if err != nil {
@@ -72,16 +76,29 @@ func run(args []string, log io.Writer) error {
 		defer pprof.StopCPUProfile()
 	}
 	var parts []index.Index
-	times := bench.Measure(*warmup, *repeat, func() { parts = build(texts, opts) })
+	times := bench.Measure(*warmup, *repeat, func() {
+		merge = 0
+		parts = build(texts, opts)
+		if merge != 0 {
+			merges = append(merges, merge)
+		}
+	})
+	if len(merges) > 0 {
+		merges = merges[*warmup:]
+	}
 	k := 0 // only V3 has a K
 	if *version == "v3" {
 		k = *stripes
 	}
 	fmt.Fprintf(log, "%s p=%d k=%d: %v over %d runs\n", *version, *threads, k, bench.Summarize(times), *repeat)
+	if len(merges) > 0 {
+		fmt.Fprintf(log, "  of which merge: %v\n", bench.Summarize(merges))
+	}
 	fmt.Fprintf(log, "occurrences: %d\n", index.Occurrences(parts...))
 
 	if *csvPath != "" {
 		rows := bench.Rows("invindex", *version, *threads, k, times)
+		rows = append(rows, bench.Rows("invindex", *version+"-merge", *threads, k, merges)...)
 		if err := bench.AppendCSV(*csvPath, bench.Header, rows); err != nil {
 			return err
 		}

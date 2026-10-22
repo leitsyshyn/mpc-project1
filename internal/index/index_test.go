@@ -46,6 +46,36 @@ func TestAddCopiesWord(t *testing.T) {
 	}
 }
 
+func TestMerge(t *testing.T) {
+	dst, src := Index{}, Index{}
+	for _, wd := range []struct {
+		ix   Index
+		word string
+		doc  int
+	}{
+		{dst, "both", 0}, {dst, "both", 0}, {dst, "dst", 1},
+		{src, "both", 2}, {src, "both", 0}, {src, "src", 3},
+	} {
+		wd.ix.Add([]byte(wd.word), wd.doc)
+	}
+
+	dst.merge(src)
+
+	want := map[string]Entry{
+		"both": {Total: 4, Docs: map[int]int{0: 3, 2: 1}},
+		"dst":  {Total: 1, Docs: map[int]int{1: 1}},
+		"src":  {Total: 1, Docs: map[int]int{3: 1}},
+	}
+	if len(dst) != len(want) {
+		t.Fatalf("merged %d words, want %d", len(dst), len(want))
+	}
+	for word, w := range want {
+		if e := dst[word]; e == nil || e.Total != w.Total || !maps.Equal(e.Docs, w.Docs) {
+			t.Errorf("%s = %+v, want %+v", word, e, w)
+		}
+	}
+}
+
 func TestWriteFormat(t *testing.T) {
 	ix := Index{}
 	add := func(word string, doc, n int) {

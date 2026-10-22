@@ -75,6 +75,20 @@ func TestRun(t *testing.T) {
 	if got, _ := os.ReadFile(out); string(got) != "hello\t2\tdoc0:2\nworld\t2\tdoc0:1,doc1:1\n" {
 		t.Errorf("v3 index =\n%s", got)
 	}
+
+	// V4 also records its merge phase, as a separate pseudo-version.
+	if err := run([]string{"-v", "v4tree", "-p", "2", "-in", in, "-out", out, "-repeat", "2", "-csv", csv}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	rows, err = os.ReadFile(csv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	merges := strings.Count(string(rows), "\ninvindex,v4tree-merge,2,,")
+	builds := strings.Count(string(rows), "\ninvindex,v4tree,2,,")
+	if merges != 2 || builds != 2 {
+		t.Errorf("csv has %d v4tree and %d v4tree-merge rows, want 2 each:\n%s", builds, merges, rows)
+	}
 }
 
 func TestRunRejectsBadArgs(t *testing.T) {
