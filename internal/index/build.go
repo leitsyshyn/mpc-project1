@@ -1,5 +1,3 @@
-// Package index builds an inverted index of a text corpus with several
-// synchronization strategies.
 package index
 
 import (
@@ -12,18 +10,17 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 )
 
-// Options configures the parallel versions.
+// Options configures a build. Stripes is the number of locks K of V3. If
+// MergeTime is not nil, V4 stores the duration of its merge phase in it. A nil
+// Tokenize means Words.
 type Options struct {
-	Threads int // worker goroutines
-	Stripes int // V3: number of locks K
-
-	// Merge, if set, receives the duration of V4's merge phase.
-	Merge *time.Duration
-
-	// Tokenize splits a document into words; nil means Words.
-	Tokenize func(text []byte) iter.Seq[[]byte]
+	Threads   int
+	Stripes   int
+	MergeTime *time.Duration
+	Tokenize  TokenizeFunc
 }
 
 func (o Options) words(text []byte) iter.Seq[[]byte] {
@@ -33,58 +30,52 @@ func (o Options) words(text []byte) iter.Seq[[]byte] {
 	return o.Tokenize(text)
 }
 
-// BuildFunc builds the index of texts, where texts[i] is document i. The result
-// may be split into parts with disjoint words.
+// BuildFunc builds the index of texts, document i being texts[i], as parts
+// with disjoint words.
 type BuildFunc func(texts [][]byte, o Options) []Index
 
 var versions = map[string]BuildFunc{
-	"v0": sequential,
-	"v1": unsynchronized,
-	"v2": singleLock,
-	"v3": striped,
-	"v4seq": func(texts [][]byte, o Options) []Index {
-		return localThenMerge(texts, o, mergeSequential)
-	},
-	"v4tree": func(texts [][]byte, o Options) []Index {
-		return localThenMerge(texts, o, mergeTree)
-	},
-	"cas":     lockFree,
-	"syncmap": syncMapBuild,
+	"v0":      sequential,
+	"v1":      shared(newRacyTable),
+	"v2":      singleMutex,
+	"v3":      striped,
+	"v4seq":   localIndexes(mergeSequential),
+	"v4tree":  localIndexes(mergeTree),
+	"cas":     shared(newCASTable),
+	"syncmap": shared(newSyncMapTable),
 }
 
-// seed keys the hash that picks V1's buckets and V3's stripes.
+var tokenizers = map[string]TokenizeFunc{
+	"simple": Words,
+	"fast":   FastWords,
+}
+
+// Versions returns the names of the versions in order.
+func Versions() []string { return names(versions) }
+
+// Version returns the named version.
+func Version(name string) (BuildFunc, error) { return lookup(versions, "version", name) }
+
+// Tokenizers returns the names of the tokenizers in order.
+func Tokenizers() []string { return names(tokenizers) }
+
+// Tokenizer returns the named tokenizer.
+func Tokenizer(name string) (TokenizeFunc, error) { return lookup(tokenizers, "tokenizer", name) }
+
+func names[T any](m map[string]T) []string { return slices.Sorted(maps.Keys(m)) }
+
+func lookup[T any](m map[string]T, kind, name string) (T, error) {
+	v, ok := m[name]
+	if !ok {
+		return v, fmt.Errorf("unknown %s %q, want one of: %s", kind, name, strings.Join(names(m), ", "))
+	}
+	return v, nil
+}
+
 var seed = maphash.MakeSeed()
 
-// cacheLine is the cache line size of the target machine (Apple M1; 64 bytes
-// on most x86 CPUs, so 128 covers both).
 const cacheLine = 128
 
-// Versions returns the names of all versions in order.
-func Versions() []string { return slices.Sorted(maps.Keys(versions)) }
-
-// Version returns the build function of the named version.
-func Version(name string) (BuildFunc, error) {
-	build, ok := versions[name]
-	if !ok {
-		return nil, fmt.Errorf("unknown version %q, want one of: %s", name, strings.Join(Versions(), ", "))
-	}
-	return build, nil
-}
-
-// sequential is V0: one goroutine and no synchronization.
-func sequential(texts [][]byte, o Options) []Index {
-	ix := Index{}
-	for doc, text := range texts {
-		for w := range o.words(text) {
-			ix.Add(w, doc)
-		}
-	}
-	return []Index{ix}
-}
-
-// parallel calls work for every document on o.Threads goroutines. Work is
-// split by whole files: each goroutine repeatedly takes the next unprocessed
-// document from a shared counter, which balances files of different sizes.
 func parallel(texts [][]byte, o Options, work func(worker, doc int)) {
 	var next atomic.Int64
 	var wg sync.WaitGroup
@@ -98,21 +89,17 @@ func parallel(texts [][]byte, o Options, work func(worker, doc int)) {
 	wg.Wait()
 }
 
-// unsynchronized is V1: goroutines update one shared index without any mutual
-// exclusion, so concurrent updates get lost. See racyTable.
-func unsynchronized(texts [][]byte, o Options) []Index {
-	t := &racyTable{buckets: make([]*node, bucketCount(texts))}
-	parallel(texts, o, func(_, doc int) {
-		for w := range o.words(texts[doc]) {
-			t.add(w, doc)
+func sequential(texts [][]byte, o Options) []Index {
+	ix := Index{}
+	for doc, text := range texts {
+		for w := range o.words(text) {
+			ix.Add(w, doc)
 		}
-	})
-	return []Index{t.index()}
+	}
+	return []Index{ix}
 }
 
-// singleLock is V2: one shared index guarded by a single mutex taken for every
-// update.
-func singleLock(texts [][]byte, o Options) []Index {
+func singleMutex(texts [][]byte, o Options) []Index {
 	ix := Index{}
 	var mu sync.Mutex
 	parallel(texts, o, func(_, doc int) {
@@ -125,16 +112,12 @@ func singleLock(texts [][]byte, o Options) []Index {
 	return []Index{ix}
 }
 
-// stripe is one of V3's K independent index parts with its own lock, padded so
-// that neighboring locks do not share a cache line.
 type stripe struct {
 	mu sync.Mutex
 	ix Index
-	_  [cacheLine - 16]byte
+	_  [cacheLine - unsafe.Sizeof(sync.Mutex{}) - unsafe.Sizeof(Index{})]byte
 }
 
-// striped is V3: the index is split into K stripes and a word belongs to
-// stripe hash(word) mod K, so updates of different stripes do not contend.
 func striped(texts [][]byte, o Options) []Index {
 	stripes := make([]stripe, o.Stripes)
 	for i := range stripes {
@@ -155,30 +138,27 @@ func striped(texts [][]byte, o Options) []Index {
 	return parts
 }
 
-// localThenMerge is V4: every goroutine builds its own index without
-// synchronization, then the local indexes are merged into one.
-func localThenMerge(texts [][]byte, o Options, merge func([]Index) Index) []Index {
-	locals := make([]Index, o.Threads)
-	for i := range locals {
-		locals[i] = Index{}
-	}
-	parallel(texts, o, func(worker, doc int) {
-		ix := locals[worker]
-		for w := range o.words(texts[doc]) {
-			ix.Add(w, doc)
+func localIndexes(merge func([]Index) Index) BuildFunc {
+	return func(texts [][]byte, o Options) []Index {
+		locals := make([]Index, o.Threads)
+		for i := range locals {
+			locals[i] = Index{}
 		}
-	})
+		parallel(texts, o, func(worker, doc int) {
+			for w := range o.words(texts[doc]) {
+				locals[worker].Add(w, doc)
+			}
+		})
 
-	start := time.Now()
-	ix := merge(locals)
-	if o.Merge != nil {
-		*o.Merge = time.Since(start)
+		start := time.Now()
+		ix := merge(locals)
+		if o.MergeTime != nil {
+			*o.MergeTime = time.Since(start)
+		}
+		return []Index{ix}
 	}
-	return []Index{ix}
 }
 
-// mergeSequential merges the local indexes one after another into the first:
-// P-1 sequential steps.
 func mergeSequential(locals []Index) Index {
 	for _, ix := range locals[1:] {
 		locals[0].merge(ix)
@@ -186,9 +166,6 @@ func mergeSequential(locals []Index) Index {
 	return locals[0]
 }
 
-// mergeTree merges the local indexes pairwise along a balanced binary tree:
-// each round merges disjoint pairs in parallel and halves the number of
-// indexes, so there are ceil(log2 P) sequential steps.
 func mergeTree(locals []Index) Index {
 	for step := 1; step < len(locals); step *= 2 {
 		var wg sync.WaitGroup

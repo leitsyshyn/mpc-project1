@@ -40,7 +40,7 @@ func TestAddCopiesWord(t *testing.T) {
 	ix := Index{}
 	buf := []byte("cat")
 	ix.Add(buf, 0)
-	copy(buf, "dog") // Words reuses its buffer, so Add must not keep it.
+	copy(buf, "dog")
 	if _, ok := ix["cat"]; !ok {
 		t.Errorf("key changed after mutating the input buffer: %v", ix)
 	}
@@ -76,6 +76,16 @@ func TestMerge(t *testing.T) {
 	}
 }
 
+func TestOccurrences(t *testing.T) {
+	a, b := Index{}, Index{}
+	a.Add([]byte("cat"), 0)
+	a.Add([]byte("cat"), 1)
+	b.Add([]byte("dog"), 2)
+	if got := Occurrences(a, b); got != 3 {
+		t.Errorf("Occurrences = %d, want 3", got)
+	}
+}
+
 func TestWriteFormat(t *testing.T) {
 	ix := Index{}
 	add := func(word string, doc, n int) {
@@ -89,12 +99,10 @@ func TestWriteFormat(t *testing.T) {
 	add("apple", 3, 5)
 	add("тест", 0, 2)
 	add("ábc", 1, 1)
-	// Equal counts are ordered by ascending document number, numerically.
 	add("tie", 10, 2)
 	add("tie", 2, 2)
 	add("tie", 7, 3)
 
-	// Words are ordered by UTF-8 bytes: ASCII < Latin-1 supplement < Cyrillic.
 	want := "apple\t18\tdoc17:12,doc3:5,doc41:1\n" +
 		"tie\t7\tdoc7:3,doc2:2,doc10:2\n" +
 		"zebra\t1\tdoc3:1\n" +

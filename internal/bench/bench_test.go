@@ -44,7 +44,7 @@ func TestMeasureExcludesWarmup(t *testing.T) {
 	times := Measure(1, 5, func() {
 		calls++
 		if calls == 1 {
-			time.Sleep(20 * time.Millisecond) // a slow first run must not be reported
+			time.Sleep(20 * time.Millisecond)
 		}
 	})
 	if calls != 6 {
@@ -62,9 +62,9 @@ func TestMeasureExcludesWarmup(t *testing.T) {
 
 func TestAppendCSV(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "results.csv")
-	header := []string{"version", "seconds"}
-	for _, row := range [][]string{{"v0", "1.5"}, {"v2", "2.5"}} {
-		if err := AppendCSV(path, header, [][]string{row}); err != nil {
+	rows := Rows("invindex", "v2", 4, 0, []time.Duration{time.Second, 2 * time.Second})
+	for _, row := range rows {
+		if err := AppendCSV(path, [][]string{row}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -73,7 +73,10 @@ func TestAppendCSV(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "version,seconds\nv0,1.5\nv2,2.5\n"; string(got) != want {
+	want := "program,version,threads,k,run,seconds\n" +
+		"invindex,v2,4,,1,1.000000\n" +
+		"invindex,v2,4,,2,2.000000\n"
+	if string(got) != want {
 		t.Errorf("csv =\n%s\nwant\n%s", got, want)
 	}
 }
@@ -87,7 +90,6 @@ func TestRows(t *testing.T) {
 	if !slices.EqualFunc(got, want, slices.Equal) {
 		t.Errorf("Rows = %q, want %q", got, want)
 	}
-	// K is left empty for versions that have no K.
 	if got := Rows("invindex", "v0", 1, 0, []time.Duration{time.Second}); got[0][3] != "" {
 		t.Errorf("k column = %q, want empty", got[0][3])
 	}

@@ -24,8 +24,6 @@ func TestCountersLayout(t *testing.T) {
 }
 
 func TestIncrement(t *testing.T) {
-	// Even packed into one cache line, counters owned by one goroutine each lose
-	// no updates: false sharing costs time, not correctness.
 	cs := counters(8, 8)
 	increment(cs, 100_000)
 	for i, c := range cs {
@@ -58,7 +56,7 @@ func TestRun(t *testing.T) {
 
 func TestRunRejectsBadArgs(t *testing.T) {
 	for _, args := range [][]string{
-		{"-stride", "12"}, // not a whole number of counters
+		{"-stride", "12"},
 		{"-stride", "0"},
 		{"-p", "0"},
 		{"-p", "two"},

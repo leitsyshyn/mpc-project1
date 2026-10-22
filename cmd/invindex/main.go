@@ -1,5 +1,5 @@
-// Command invindex builds an inverted index over a directory of text files and
-// reports how long the build takes.
+// Command invindex builds the inverted index of a directory of text files with
+// one of the versions of the index package and reports the build time.
 package main
 
 import (
@@ -7,9 +7,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"iter"
 	"os"
 	"runtime/pprof"
+	"slices"
 	"strings"
 	"time"
 
@@ -28,15 +28,15 @@ func run(args []string, log io.Writer) error {
 	fs := flag.NewFlagSet("invindex", flag.ContinueOnError)
 	fs.SetOutput(log)
 	version := fs.String("v", "v0", "version: "+strings.Join(index.Versions(), ", "))
-	threads := fs.Int("p", 1, "number of worker goroutines (v0 ignores it)")
-	stripes := fs.Int("k", 1024, "number of locks K (v3 only)")
+	threads := fs.Int("p", 1, "number of goroutines, ignored by v0")
+	stripes := fs.Int("k", 1024, "number of locks K of v3")
+	tokenizer := fs.String("tokenizer", "simple", "tokenizer: "+strings.Join(index.Tokenizers(), ", "))
 	in := fs.String("in", "data", "corpus directory")
 	out := fs.String("out", "index.tsv", "output file")
 	warmup := fs.Int("warmup", 1, "untimed runs before measuring")
 	repeat := fs.Int("repeat", 5, "timed runs")
-	csvPath := fs.String("csv", "", "append per-run timings to this CSV file")
-	cpuProfile := fs.String("cpuprofile", "", "write a CPU profile of the timed runs to this file")
-	tokenizer := fs.String("tokenizer", "simple", "tokenizer: simple (Words) or fast (FastWords)")
+	csvPath := fs.String("csv", "", "append the timings to this CSV file")
+	cpuProfile := fs.String("cpuprofile", "", "write a CPU profile of the runs to this file")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -45,76 +45,79 @@ func run(args []string, log io.Writer) error {
 	if err != nil {
 		return err
 	}
-	tokenizers := map[string]func([]byte) iter.Seq[[]byte]{"simple": index.Words, "fast": index.FastWords}
-	tokenize, ok := tokenizers[*tokenizer]
-	if !ok {
-		return fmt.Errorf("unknown tokenizer %q, want simple or fast", *tokenizer)
-	}
-	label := *version // the version as recorded in the CSV
-	if *tokenizer != "simple" {
-		label += "-" + *tokenizer
+	tokenize, err := index.Tokenizer(*tokenizer)
+	if err != nil {
+		return err
 	}
 	if *threads < 1 || *stripes < 1 || *repeat < 1 || *warmup < 0 {
 		return errors.New("-p, -k and -repeat must be positive and -warmup non-negative")
 	}
-
-	// The corpus is read into memory before timing, so I/O is not measured.
-	docs, err := index.Load(*in)
-	if err != nil {
-		return err
+	label, k := *version, 0
+	if *tokenizer != "simple" {
+		label += "-" + *tokenizer
 	}
-	texts := make([][]byte, len(docs))
-	size := 0
-	for i, d := range docs {
-		texts[i] = d.Text
-		size += len(d.Text)
-	}
-	fmt.Fprintf(log, "corpus: %d files, %.1f MiB\n", len(docs), float64(size)/(1<<20))
-
-	// Only V4 sets merge; each run's merge time is recorded separately.
-	var merge time.Duration
-	var merges []time.Duration
-	opts := index.Options{Threads: *threads, Stripes: *stripes, Merge: &merge, Tokenize: tokenize}
-	if *cpuProfile != "" {
-		f, err := os.Create(*cpuProfile)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		if err := pprof.StartCPUProfile(f); err != nil {
-			return err
-		}
-		defer pprof.StopCPUProfile()
-	}
-	var parts []index.Index
-	times := bench.Measure(*warmup, *repeat, func() {
-		merge = 0
-		parts = build(texts, opts)
-		if merge != 0 {
-			merges = append(merges, merge)
-		}
-	})
-	if len(merges) > 0 {
-		merges = merges[*warmup:]
-	}
-	k := 0 // only V3 has a K
 	if *version == "v3" {
 		k = *stripes
 	}
+
+	texts, err := index.Load(*in)
+	if err != nil {
+		return err
+	}
+	size := 0
+	for _, text := range texts {
+		size += len(text)
+	}
+	fmt.Fprintf(log, "corpus: %d files, %.1f MiB\n", len(texts), float64(size)/(1<<20))
+
+	stop, err := startProfile(*cpuProfile)
+	if err != nil {
+		return err
+	}
+	var parts []index.Index
+	var merge time.Duration
+	var merges []time.Duration
+	opts := index.Options{Threads: *threads, Stripes: *stripes, MergeTime: &merge, Tokenize: tokenize}
+	times := bench.Measure(*warmup, *repeat, func() {
+		parts = build(texts, opts)
+		merges = append(merges, merge)
+	})
+	merges = merges[*warmup:]
+	if err := stop(); err != nil {
+		return err
+	}
+
 	fmt.Fprintf(log, "%s p=%d k=%d: %v over %d runs\n", label, *threads, k, bench.Summarize(times), *repeat)
-	if len(merges) > 0 {
+	rows := bench.Rows("invindex", label, *threads, k, times)
+	if slices.Max(merges) > 0 {
 		fmt.Fprintf(log, "  of which merge: %v\n", bench.Summarize(merges))
+		rows = append(rows, bench.Rows("invindex", label+"-merge", *threads, k, merges)...)
 	}
 	fmt.Fprintf(log, "occurrences: %d\n", index.Occurrences(parts...))
 
 	if *csvPath != "" {
-		rows := bench.Rows("invindex", label, *threads, k, times)
-		rows = append(rows, bench.Rows("invindex", label+"-merge", *threads, k, merges)...)
-		if err := bench.AppendCSV(*csvPath, bench.Header, rows); err != nil {
+		if err := bench.AppendCSV(*csvPath, rows); err != nil {
 			return err
 		}
 	}
 	return writeIndex(*out, parts)
+}
+
+func startProfile(path string) (stop func() error, err error) {
+	if path == "" {
+		return func() error { return nil }, nil
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := pprof.StartCPUProfile(f); err != nil {
+		return nil, errors.Join(err, f.Close())
+	}
+	return func() error {
+		pprof.StopCPUProfile()
+		return f.Close()
+	}, nil
 }
 
 func writeIndex(path string, parts []index.Index) (err error) {

@@ -23,9 +23,6 @@ const sampleIndex = "and\t1\tdoc1:1\n" +
 	"sat\t1\tdoc0:1\n" +
 	"the\t4\tdoc0:3,doc1:1\n"
 
-// zipfCorpus generates documents of varying length whose word frequencies
-// follow Zipf's law, as in natural language, with mixed case, Cyrillic words
-// and assorted separators.
 func zipfCorpus(docs int) [][]byte {
 	r := rand.New(rand.NewPCG(1, 2))
 	zipf := rand.NewZipf(r, 1.1, 1, 20_000)
@@ -64,21 +61,23 @@ func TestBuildV0(t *testing.T) {
 	}
 }
 
-func TestUnknownVersion(t *testing.T) {
+func TestUnknownNames(t *testing.T) {
 	if _, err := Version("v9"); err == nil {
 		t.Error("Version(v9) succeeded, want error")
 	}
+	if _, err := Tokenizer("regex"); err == nil {
+		t.Error("Tokenizer(regex) succeeded, want error")
+	}
 }
 
-// correct lists the versions whose output must match V0 byte for byte.
-var correct = []string{"v2", "v3", "v4seq", "v4tree", "cas", "syncmap"}
+var correctVersions = []string{"v2", "v3", "v4seq", "v4tree", "cas", "syncmap"}
 
 func TestCorrectVersionsMatchV0(t *testing.T) {
 	texts := zipfCorpus(60)
 	want := write(t, build(t, "v0", texts, Options{})...)
-	for _, v := range correct {
-		for _, p := range []int{1, 2, 3, 8, 100} { // more threads than documents too
-			for _, k := range []int{1, 7, 4096} { // more stripes than words too
+	for _, v := range correctVersions {
+		for _, p := range []int{1, 2, 3, 8, 100} {
+			for _, k := range []int{1, 7, 4096} {
 				t.Run(fmt.Sprintf("%s/p=%d/k=%d", v, p, k), func(t *testing.T) {
 					if got := write(t, build(t, v, texts, Options{Threads: p, Stripes: k})...); got != want {
 						t.Errorf("output differs from v0")
@@ -89,10 +88,10 @@ func TestCorrectVersionsMatchV0(t *testing.T) {
 	}
 }
 
-func TestFastTokenizerGivesSameIndex(t *testing.T) {
+func TestFastWordsGivesSameIndex(t *testing.T) {
 	texts := zipfCorpus(60)
 	want := write(t, build(t, "v0", texts, Options{})...)
-	for _, v := range append([]string{"v0"}, correct...) {
+	for _, v := range append([]string{"v0"}, correctVersions...) {
 		if got := write(t, build(t, v, texts, Options{Threads: 4, Stripes: 64, Tokenize: FastWords})...); got != want {
 			t.Errorf("%s with FastWords differs from v0 with Words", v)
 		}
@@ -118,7 +117,7 @@ func TestV3PartsAreDisjoint(t *testing.T) {
 func TestV4ReportsMergeTime(t *testing.T) {
 	for _, v := range []string{"v4seq", "v4tree"} {
 		var merge time.Duration
-		build(t, v, zipfCorpus(20), Options{Threads: 4, Merge: &merge})
+		build(t, v, zipfCorpus(20), Options{Threads: 4, MergeTime: &merge})
 		if merge <= 0 {
 			t.Errorf("%s: merge time = %v, want > 0", v, merge)
 		}
@@ -139,8 +138,6 @@ func TestV1SingleThreadIsCorrect(t *testing.T) {
 	}
 }
 
-// TestV1OnlyLosesUpdates checks that races in V1 can lose updates but never
-// invent words or documents, nor count more occurrences than there are.
 func TestV1OnlyLosesUpdates(t *testing.T) {
 	if raceEnabled {
 		t.Skip("v1 races by design")
@@ -170,27 +167,16 @@ func TestV1LosesUpdates(t *testing.T) {
 	if runtime.NumCPU() < 2 {
 		t.Skip("needs parallel hardware")
 	}
-	// Every thread hammers the total counter of the same word.
 	texts := make([][]byte, 32)
 	for i := range texts {
 		texts[i] = bytes.Repeat([]byte("the "), 50_000)
 	}
 	want := len(texts) * 50_000
-	for range 5 { // the loss is not deterministic, so allow a few attempts
+	for range 5 {
 		if got := Occurrences(build(t, "v1", texts, Options{Threads: 8})...); got < want {
 			t.Logf("lost %d of %d updates", want-got, want)
 			return
 		}
 	}
 	t.Errorf("v1 lost no updates in 5 runs")
-}
-
-func TestOccurrences(t *testing.T) {
-	a, b := Index{}, Index{}
-	a.Add([]byte("cat"), 0)
-	a.Add([]byte("cat"), 1)
-	b.Add([]byte("dog"), 2)
-	if got := Occurrences(a, b); got != 3 {
-		t.Errorf("Occurrences = %d, want 3", got)
-	}
 }

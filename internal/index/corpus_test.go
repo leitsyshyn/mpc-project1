@@ -27,22 +27,16 @@ func TestLoad(t *testing.T) {
 		}
 	}
 
-	docs, err := Load(dir)
+	texts, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// Documents are numbered in lexical path order, recursing into subdirectories.
-	var names, texts []string
-	for _, d := range docs {
-		names = append(names, d.Name)
-		texts = append(texts, string(d.Text))
+	var got []string
+	for _, text := range texts {
+		got = append(got, string(text))
 	}
-	if want := []string{"a.txt", "b.txt", "sub/c.txt", "sub/deep/d.x"}; !slices.Equal(names, want) {
-		t.Errorf("names = %q, want %q", names, want)
-	}
-	if want := []string{"alpha", "bravo", "charlie", "delta"}; !slices.Equal(texts, want) {
-		t.Errorf("texts = %q, want %q", texts, want)
+	if want := []string{"alpha", "bravo", "charlie", "delta"}; !slices.Equal(got, want) {
+		t.Errorf("Load = %q, want %q", got, want)
 	}
 }
 

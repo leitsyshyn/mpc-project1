@@ -1,3 +1,5 @@
+// Package index builds an inverted index of a text corpus with several
+// synchronization strategies.
 package index
 
 import (
@@ -9,28 +11,28 @@ import (
 	"strings"
 )
 
-// Entry is the posting list of one word.
+// Entry holds a word's number of occurrences in the corpus and per document.
 type Entry struct {
-	Total int         // occurrences in the whole corpus
-	Docs  map[int]int // document number -> occurrences
+	Total int
+	Docs  map[int]int
 }
 
-// Index maps a word to its posting list.
+// Index maps each word to its entry.
 type Index map[string]*Entry
 
 // Add records one occurrence of word in document doc. It does not retain word.
 func (ix Index) Add(word []byte, doc int) {
-	e := ix[string(word)] // the conversion does not allocate for a lookup
+	e := ix[string(word)]
 	if e == nil {
-		e = &Entry{Docs: map[int]int{}}
+		e = newEntry()
 		ix[string(word)] = e
 	}
 	e.Total++
 	e.Docs[doc]++
 }
 
-// merge adds the postings of src to ix. Entries of words missing from ix are
-// moved, not copied, so src must not be used afterwards.
+func newEntry() *Entry { return &Entry{Docs: map[int]int{}} }
+
 func (ix Index) merge(src Index) {
 	for word, e := range src {
 		d := ix[word]
@@ -56,12 +58,12 @@ func Occurrences(parts ...Index) int {
 	return n
 }
 
-// Write writes the index, one line per word:
+// Write writes the parts, which must have disjoint words, one line per word:
 //
 //	word<TAB>total<TAB>docN:count,docM:count,...
 //
-// Lines are ordered by the word's UTF-8 bytes and postings by descending count,
-// then ascending document number. The parts must have disjoint words.
+// Lines are ordered by the word's UTF-8 bytes, postings by descending count,
+// then ascending document number.
 func Write(w io.Writer, parts ...Index) error {
 	type line struct {
 		word string

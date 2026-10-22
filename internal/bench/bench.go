@@ -1,6 +1,5 @@
-// Package bench implements the measurement methodology shared by all
-// experiments: untimed warmup runs, repeated timed runs, median and range, and
-// a common results.csv schema.
+// Package bench implements the measurement methodology of the experiments:
+// untimed warmup runs, repeated timed runs, median and range, and results.csv.
 package bench
 
 import (
@@ -14,9 +13,8 @@ import (
 	"time"
 )
 
-// Measure calls fn warmup times untimed, then repeat times timed, and returns
-// the timed durations. It collects garbage before every call so that leftovers
-// of one run do not slow down the next.
+// Measure runs fn warmup times untimed, then repeat times timed, collecting
+// garbage before every run, and returns the timed durations.
 func Measure(warmup, repeat int, fn func()) []time.Duration {
 	times := make([]time.Duration, 0, repeat)
 	for i := range warmup + repeat {
@@ -35,7 +33,7 @@ type Summary struct {
 	Median, Min, Max time.Duration
 }
 
-// Summarize computes the summary of a non-empty set of timings.
+// Summarize returns the summary of a non-empty set of timings.
 func Summarize(times []time.Duration) Summary {
 	s := slices.Sorted(slices.Values(times))
 	n := len(s)
@@ -46,11 +44,11 @@ func (s Summary) String() string {
 	return fmt.Sprintf("median %v (min %v, max %v)", s.Median, s.Min, s.Max)
 }
 
-// Header is the schema of results.csv.
+// Header is the header of results.csv.
 var Header = []string{"program", "version", "threads", "k", "run", "seconds"}
 
-// Rows formats the timings of one configuration as results.csv rows. A zero k
-// means the configuration has no K and leaves the column empty.
+// Rows formats the timings of one configuration as results.csv rows, leaving
+// the k column empty when k is 0.
 func Rows(program, version string, threads, k int, times []time.Duration) [][]string {
 	ks := ""
 	if k != 0 {
@@ -63,9 +61,8 @@ func Rows(program, version string, threads, k int, times []time.Duration) [][]st
 	return rows
 }
 
-// AppendCSV appends rows to the CSV file at path, writing header first if the
-// file is new or empty.
-func AppendCSV(path string, header []string, rows [][]string) error {
+// AppendCSV appends rows to the CSV file at path, starting a new file with Header.
+func AppendCSV(path string, rows [][]string) error {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
 	if err != nil {
 		return err
@@ -74,9 +71,8 @@ func AppendCSV(path string, header []string, rows [][]string) error {
 	if err != nil {
 		return errors.Join(err, f.Close())
 	}
-	w := csv.NewWriter(f)
 	if info.Size() == 0 {
-		rows = append([][]string{header}, rows...)
+		rows = append([][]string{Header}, rows...)
 	}
-	return errors.Join(w.WriteAll(rows), f.Close())
+	return errors.Join(csv.NewWriter(f).WriteAll(rows), f.Close())
 }

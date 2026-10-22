@@ -30,7 +30,7 @@ measure() {
     rm -f "$tmp/run.csv"
     return 1
   fi
-  if [[ -s $csv ]]; then # the header goes only into a new results file
+  if [[ -s $csv ]]; then
     tail -n +2 "$tmp/run.csv" >>"$csv"
   else
     cat "$tmp/run.csv" >>"$csv"

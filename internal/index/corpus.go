@@ -7,17 +7,10 @@ import (
 	"strings"
 )
 
-// Doc is one corpus file.
-type Doc struct {
-	Name string // path relative to the corpus directory, slash-separated
-	Text []byte
-}
-
-// Load reads every regular file under dir into memory, recursing into
-// subdirectories and skipping hidden entries. Documents are numbered in walk
-// (lexical) order.
-func Load(dir string) ([]Doc, error) {
-	var docs []Doc
+// Load reads every regular file under dir, skipping hidden entries. Document i
+// is the i-th file in lexical walk order.
+func Load(dir string) ([][]byte, error) {
+	var texts [][]byte
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		switch {
 		case err != nil:
@@ -31,12 +24,8 @@ func Load(dir string) ([]Doc, error) {
 			return nil
 		}
 		text, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(dir, path)
-		docs = append(docs, Doc{filepath.ToSlash(rel), text})
+		texts = append(texts, text)
 		return err
 	})
-	return docs, err
+	return texts, err
 }

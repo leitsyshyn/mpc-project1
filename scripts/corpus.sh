@@ -38,8 +38,6 @@ enough() {
 offset=0
 until enough; do
   page=$(curl -fsS "$harvest&offset=$offset")
-  # One file per book: prefer UTF-8 (-0), fall back to plain ASCII; skip
-  # Latin-1 (-8) since the assignment requires UTF-8 input.
   grep -oE 'https://[^"]+/[0-9]+(-0)?\.zip' <<<"$page" |
     awk -F/ '{ id=$(NF-1); if (!(id in u) || $NF ~ /-0\.zip$/) u[id]=$0 } END { for (id in u) print u[id] }' |
     sed "s#^https://[^/]*#$mirror#" |
@@ -47,7 +45,7 @@ until enough; do
 
   offset=$(grep -oE 'offset=[0-9]+' <<<"$page" | tail -1 | cut -d= -f2)
   [[ -z $offset ]] && { echo "harvest exhausted" >&2; break; }
-  sleep 2 # be polite to the harvest endpoint
+  sleep 2
 done
 
 echo "$(find "$dir" -type f -name '*.txt' | wc -l | tr -d ' ') files, $(du -sm "$dir" | cut -f1) MB in $dir"
