@@ -1,34 +1,73 @@
 # Parallel inverted index
 
-Course project for "Methods of Parallel Computing". Assignment: `Навчальний проєкт 1 — Паралельна побудова зворотного індексу.pdf`.
+Course project 1 for "Methods of Parallel Computing" (KNU, FCSC): building an
+inverted index with different synchronization strategies and measuring their
+effect on performance. The report is in [`report/report.md`](report/report.md).
+
+## Requirements
+
+- Go 1.26+ (no third-party modules)
+- `curl`, `unzip`, `iconv` to download the corpus
 
 ## Layout
 
-- `cmd/invindex` — inverted index builder (versions V0–V4)
-- `cmd/falseshare` — standalone false sharing experiment
+| Path              | Contents                                                     |
+| ----------------- | ------------------------------------------------------------ |
+| `cmd/invindex`    | index builder CLI: loads the corpus, times the build, writes the index |
+| `cmd/falseshare`  | standalone false sharing experiment                          |
+| `internal/index`  | tokenizer, corpus loader, index, output format, versions     |
+| `internal/bench`  | measurement methodology: warmup, repeats, median, `results.csv` |
+| `scripts/`        | corpus download                                              |
 
-## Usage
-
-Requires Go 1.26+.
+## Corpus
 
 ```sh
-go run ./cmd/invindex -v v0 -in data -out v0.tsv
-go run ./cmd/invindex -v v3 -p 8 -k 256 -in data -out v3.tsv
-cmp v0.tsv v3.tsv
-
-go run ./cmd/falseshare -p 8
+scripts/corpus.sh data 220 200   # ≥220 MB and ≥200 English UTF-8 books from Project Gutenberg
 ```
 
-Build optimized binaries for measurements (Go optimizes by default):
+Documents are numbered from 0 in lexical path order (`docN` is the N-th file
+under the corpus directory; hidden files are skipped).
+
+## Build
+
+Go optimizes and inlines by default, so a plain build is the optimized
+("release") build. Measurements must not use `-race` or `-gcflags=-N -l`.
 
 ```sh
-go build -o bin/ ./cmd/...
+go build -trimpath -o bin/ ./cmd/...
 ```
 
-## Checks
+## Run
 
 ```sh
-gofmt -l .
-go vet ./...
-go test -race ./...
+bin/invindex -v v0 -in data -out v0.tsv -csv results.csv
+```
+
+| Flag      | Default     | Meaning                                         |
+| --------- | ----------- | ----------------------------------------------- |
+| `-v`      | `v0`        | version (`v0` sequential)                       |
+| `-p`      | `1`         | number of worker goroutines (ignored by `v0`)   |
+| `-in`     | `data`      | corpus directory                                |
+| `-out`    | `index.tsv` | output file                                     |
+| `-warmup` | `1`         | untimed runs before measuring                   |
+| `-repeat` | `5`         | timed runs                                      |
+| `-csv`    | none        | append per-run timings to this CSV file         |
+
+The corpus is read into memory before timing, and the index is written after
+it. Only the build is timed. The tool prints the median, min and max to stderr.
+
+Output format, one line per word, sorted by UTF-8 bytes; postings by descending
+count, then ascending document number:
+
+```
+word<TAB>total<TAB>doc17:12,doc3:5,doc41:1
+```
+
+## Tests
+
+```sh
+go test ./...                                          # unit and end-to-end tests
+go test -race ./...                                    # with the race detector
+go test ./internal/index -run '^$' -fuzz FuzzWords     # fuzz the tokenizer
+go vet ./... && gofmt -l .
 ```
