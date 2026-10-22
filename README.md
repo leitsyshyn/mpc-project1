@@ -69,6 +69,8 @@ scripts/bench.sh v0 v2 v3 v4seq v4tree k    # scaling over P and V3 over K, appe
 scripts/v1-lost-updates.sh 2 4 8 10 > results/v1-lost-updates.csv   # 10 V1 runs per thread count vs V0
 bin/invindex -out v0.tsv && scripts/zipf.py v0.tsv                  # top-20 words' share of updates, per-K lock load
 scripts/merge_cost.py v0.tsv 8              # work per step of V4's two merge schemes
+bin/falseshare -csv results.csv            # false sharing: strides 8..256 B, P = 1, 2, 4, 8
+bin/falseshare -n 200000000 -stride 8,32,40,64,96,128,256 -csv results/falseshare-200M.csv
 uv run scripts/plots.py                     # graphs from results.csv into report/
 ```
 
@@ -84,6 +86,15 @@ count, then ascending document number:
 ```
 word<TAB>total<TAB>doc17:12,doc3:5,doc41:1
 ```
+
+### `falseshare` flags
+
+| Flag      | Default                 | Meaning                                       |
+| --------- | ----------------------- | --------------------------------------------- |
+| `-p`      | `1,2,4,8`               | numbers of goroutines                         |
+| `-stride` | `8,16,32,40,64,128,256` | distances between counters, bytes; 8 is implementation A, 64 is B |
+| `-n`      | `10000000`              | increments per goroutine                      |
+| `-warmup`, `-repeat`, `-csv` | `1`, `5`, none | as for `invindex`                 |
 
 ## Tests
 
