@@ -20,7 +20,7 @@ trap 'rm -rf "$tmp"' EXIT
 
 go build -trimpath -o bin/ ./cmd/invindex
 cp -R go.mod cmd internal "$tmp"
-sed -i '' -e '/_  \[cacheLine - unsafe.Sizeof/d' -e '/^	"unsafe"$/d' "$tmp/internal/index/build.go"
+sed -i '' -e '/_  \[cacheLine - unsafe.Sizeof/d' -e '/^	"unsafe"$/d' "$tmp/internal/index/v3.go"
 (cd "$tmp" && go build -trimpath -o unpadded ./cmd/invindex)
 
 bin/invindex -in "$dir" -out "$tmp/v0.tsv" -warmup 0 -repeat 1 2>/dev/null

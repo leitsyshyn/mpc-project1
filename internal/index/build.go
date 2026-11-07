@@ -10,7 +10,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
 )
 
 // Options configures a build. Threads and Stripes must be positive; Stripes
@@ -26,8 +25,6 @@ type Options struct {
 // BuildFunc builds the index of texts, document i being texts[i], as parts
 // with disjoint words.
 type BuildFunc func(texts [][]byte, o Options) []Index
-
-const cacheLine = 128
 
 var (
 	versions = map[string]BuildFunc{
@@ -87,92 +84,4 @@ func parallel(texts [][]byte, o Options, work func(worker, doc int)) {
 		})
 	}
 	wg.Wait()
-}
-
-func sequential(texts [][]byte, o Options) []Index {
-	ix := Index{}
-	for doc, text := range texts {
-		for w := range o.words(text) {
-			ix.Add(w, doc)
-		}
-	}
-	return []Index{ix}
-}
-
-func singleMutex(texts [][]byte, o Options) []Index {
-	ix := Index{}
-	var mu sync.Mutex
-	parallel(texts, o, func(_, doc int) {
-		for w := range o.words(texts[doc]) {
-			mu.Lock()
-			ix.Add(w, doc)
-			mu.Unlock()
-		}
-	})
-	return []Index{ix}
-}
-
-type stripe struct {
-	mu sync.Mutex
-	ix Index
-	_  [cacheLine - unsafe.Sizeof(sync.Mutex{}) - unsafe.Sizeof(Index{})]byte
-}
-
-func striped(texts [][]byte, o Options) []Index {
-	stripes := make([]stripe, o.Stripes)
-	for i := range stripes {
-		stripes[i].ix = Index{}
-	}
-	parallel(texts, o, func(_, doc int) {
-		for w := range o.words(texts[doc]) {
-			s := &stripes[maphash.Bytes(seed, w)%uint64(len(stripes))]
-			s.mu.Lock()
-			s.ix.Add(w, doc)
-			s.mu.Unlock()
-		}
-	})
-	parts := make([]Index, len(stripes))
-	for i := range stripes {
-		parts[i] = stripes[i].ix
-	}
-	return parts
-}
-
-func localIndexes(merge func([]Index) Index) BuildFunc {
-	return func(texts [][]byte, o Options) []Index {
-		locals := make([]Index, o.Threads)
-		for i := range locals {
-			locals[i] = Index{}
-		}
-		parallel(texts, o, func(worker, doc int) {
-			for w := range o.words(texts[doc]) {
-				locals[worker].Add(w, doc)
-			}
-		})
-
-		start := time.Now()
-		ix := merge(locals)
-		if o.MergeTime != nil {
-			*o.MergeTime = time.Since(start)
-		}
-		return []Index{ix}
-	}
-}
-
-func mergeSequential(locals []Index) Index {
-	for _, ix := range locals[1:] {
-		locals[0].merge(ix)
-	}
-	return locals[0]
-}
-
-func mergeTree(locals []Index) Index {
-	for step := 1; step < len(locals); step *= 2 {
-		var wg sync.WaitGroup
-		for i := 0; i+step < len(locals); i += 2 * step {
-			wg.Go(func() { locals[i].merge(locals[i+step]) })
-		}
-		wg.Wait()
-	}
-	return locals[0]
 }
